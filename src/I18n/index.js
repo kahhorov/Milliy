@@ -123,7 +123,7 @@ const resources = {
       Password: "Password",
       "Enter your password": "Enter your password",
       Login: "Login",
-      "Do you have an account?": "Do you have an account?",
+      "Don't you have an account?": "Don't you have an account?",
       "You have successfully logged in": "You have successfully logged in!",
       "Incorrect email or password": "Incorrect email or password",
       "Create account": "Create account",
@@ -288,7 +288,7 @@ const resources = {
       Password: "Parol",
       "Enter your password": "Parolingizni kriting",
       Login: "Kirish",
-      "Do you have an account?": "Hisobingiz yo'qmi ?",
+      "Don't you have an account?": "Hisobingiz yo'qmi ?",
       "You have successfully logged in":
         "Siz tizimga muvoffaqiyatli kirdingiz!",
       "Incorrect email or password": "Noto'g'ri elektron pochta yoki parol",
