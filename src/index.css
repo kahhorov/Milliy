@@ -1,0 +1,11 @@
+@import "tailwindcss";
+@theme {
+  --color-primary: #55b3ff;
+  --color-input-bg: #1a1d24;
+  --color-table-bg: #0f131a;
+}
+body {
+  font-family: "Space Grotesk Variable", sans-serif;
+  font-weight: 500;
+  color: #343434;
+}
