@@ -120,7 +120,7 @@ function Login() {
 
           {/* Submit Button */}
           <Button
-            type="submit" // Enter bosilganda ishlashini ta'minlaydi
+            type="submit"
             appearance="primary"
             loading={loading}
             block
@@ -129,7 +129,6 @@ function Login() {
             {t("Login")}
           </Button>
         </form>
-
         {/* Footer */}
         <div className="w-full flex justify-center mt-6">
           <Link

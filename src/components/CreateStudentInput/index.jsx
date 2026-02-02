@@ -81,7 +81,7 @@ function CreateStudentInput({
             setSelectedGroupId(value);
           }}
           defaultValue={selectedGroupId}
-          className={`text-gray-300 h-9`}
+          className={`text-gray-300 h-9 `}
         />
       </form>
       <CheckTree

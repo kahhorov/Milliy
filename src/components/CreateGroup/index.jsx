@@ -40,7 +40,7 @@ function CreateGroup({ open, setOpen }) {
       return;
     }
     const isExist = groups.some(
-      (g) => g.groupName.toLowerCase() === groupname.toLowerCase()
+      (g) => g.groupName.toLowerCase() === groupname.toLowerCase(),
     );
     if (isExist) {
       setText(t("A group with this name already exists!"));

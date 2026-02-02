@@ -99,20 +99,12 @@ function SidebarItems() {
         title={t("Payments")}
         icon={<MdPayment size={15} />}
       >
-        <Nav.Item eventKey="3-1">Geo</Nav.Item>
-        <Nav.Item eventKey="3-2">Devices</Nav.Item>
-        <Nav.Item eventKey="3-3">Loyalty</Nav.Item>
-        <Nav.Item eventKey="3-4">Visit Depth</Nav.Item>
-      </Nav.Menu>
-      <Nav.Menu
-        eventKey="/settings"
-        title={t("Settings")}
-        icon={<CiSettings size={17} />}
-      >
-        <Nav.Item eventKey="3-1">Geo</Nav.Item>
-        <Nav.Item eventKey="3-2">Devices</Nav.Item>
-        <Nav.Item eventKey="3-3">Loyalty</Nav.Item>
-        <Nav.Item eventKey="3-4">Visit Depth</Nav.Item>
+        <Nav.Item as={NavLink} to={"/add-payments"} eventKey="/add-payments">
+          {t("Add payment")}
+        </Nav.Item>
+        <Nav.Item as={NavLink} to={"/payment-list"} eventKey="/payment-list">
+          {t("Payment list")}
+        </Nav.Item>
       </Nav.Menu>
     </Nav>
   );

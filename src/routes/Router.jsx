@@ -5,6 +5,8 @@ import { DashboardLoading, PageNotFound } from "../components";
 import Login from "../pages/Login";
 import SignUp from "../pages/SignUp";
 import ProtectedRoute from "./ProtectedRoute";
+import AddPayments from "../pages/AddPayments";
+import PaymentList from "../pages/PaymentList";
 
 const Group = lazy(() => import("../pages/Group"));
 const AttendanceHistory = lazy(() => import("../pages/AttendanceHistory"));
@@ -45,6 +47,14 @@ function Router() {
         {
           path: "group/:id",
           element: <Group />,
+        },
+        {
+          path: "/add-payments",
+          element: <AddPayments />,
+        },
+        {
+          path: "/payment-list",
+          element: <PaymentList />,
         },
       ],
     },
