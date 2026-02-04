@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { Input, Button } from "rsuite";
-import { Link, useNavigate } from "react-router-dom";
-import { MdEmail, MdLock } from "react-icons/md";
+import { useNavigate } from "react-router-dom";
+import { MdPerson, MdLock } from "react-icons/md";
 import { HiOutlineEye, HiOutlineEyeOff } from "react-icons/hi";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { auth } from "../../firebase/firebase";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "../../firebase/firebase"; // Firebase config faylingiz yo'li
 import { useSelector } from "react-redux";
 import { useTranslation } from "react-i18next";
 import { toast } from "react-toastify";
 
 function Login() {
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+  const [inputLogin, setInputLogin] = useState("");
+  const [inputPassword, setInputPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -20,80 +20,85 @@ function Login() {
   const { t } = useTranslation();
   const navigate = useNavigate();
 
-  // 🚀 Form yuborilganda (Enter bosilganda) ishlovchi funksiya
   const handleSubmit = async (e) => {
-    e.preventDefault(); // Sahifa yangilanib ketishini oldini oladi
-
-    if (!email || !password) {
-      setError(t("Please fill all fields"));
-      return;
-    }
-
+    e.preventDefault();
     setLoading(true);
     setError("");
 
     try {
-      await signInWithEmailAndPassword(auth, email, password);
-      toast.success(t("You have successfully logged in"));
-      navigate("/");
+      // Rasmdagi auth/admin hujjatini olamiz
+      const docRef = doc(db, "auth", "admin");
+      const docSnap = await getDoc(docRef);
+
+      if (docSnap.exists()) {
+        const { login, password } = docSnap.data();
+
+        // Kiritilgan ma'lumotni bazadagi bilan solishtirish
+        if (inputLogin === login && inputPassword === password) {
+          // Muvaffaqiyatli: localStorage-ga login va parolni saqlaymiz
+          const authData = { login: inputLogin, password: inputPassword };
+          localStorage.setItem("userAuth", JSON.stringify(authData));
+
+          toast.success(t("Xush kelibsiz!"));
+          navigate("/");
+        } else {
+          setError(t("Login yoki parol noto'g'ri!"));
+          toast.error(t("Login yoki parol noto'g'ri!"));
+        }
+      } else {
+        setError(t("Bazada admin ma'lumotlari topilmadi"));
+      }
     } catch (e) {
-      setError(t("Incorrect email or password"));
+      console.error(e);
+      setError(t("Tizimda xatolik yuz berdi"));
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center">
+    <div
+      className={`min-h-screen flex items-center justify-center ${theme === "dark" ? "bg-[#090E1E]" : "bg-[#F6F7FB]"}`}
+    >
       <div
-        className={`w-full max-w-md rounded-2xl shadow-lg p-8
-        ${theme === "dark" ? "border border-gray-600 bg-[#1a1d24]" : "border border-gray-300 bg-white"}`}
+        className={`w-full max-w-md rounded-2xl shadow-lg p-8 ${theme === "dark" ? "border border-gray-600 bg-[#1a1d24]" : "border border-gray-300 bg-white"}`}
       >
-        {/* Header */}
-        <div className="mb-8">
+        <div className="mb-8 text-center">
           <h1
-            className={`text-2xl font-semibold
-            ${theme === "light" ? "text-gray-800" : "text-gray-200"}`}
+            className={`text-2xl font-semibold ${theme === "light" ? "text-gray-800" : "text-gray-200"}`}
           >
-            {t("Login")}
+            {t("Tizimga kirish")}
           </h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {t("Log in to your account")}
-          </p>
         </div>
 
-        {/* 📝 Form boshlanishi */}
         <form onSubmit={handleSubmit}>
-          {/* Email */}
           <div className="mb-5">
             <label className="text-sm text-gray-600 block mb-1">
-              {t("Email address")}
+              {t("Login")}
             </label>
             <div className="relative">
-              <MdEmail className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg z-10" />
+              <MdPerson className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg z-10" />
               <Input
-                type="email"
-                value={email}
-                onChange={setEmail}
-                placeholder="admin@gmail.com"
+                value={inputLogin}
+                onChange={setInputLogin}
+                placeholder="admin123"
                 className="!pl-10 !rounded-xl"
                 required
               />
             </div>
           </div>
 
-          {/* Password */}
-          <div className="mb-4">
+          <div className="mb-6">
             <label className="text-sm text-gray-600 block mb-1">
-              {t("Password")}
+              {t("Parol")}
             </label>
             <div className="relative">
               <MdLock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg z-10" />
               <Input
                 type={showPassword ? "text" : "password"}
-                value={password}
-                onChange={setPassword}
-                placeholder={t("Enter your password")}
+                value={inputPassword}
+                onChange={setInputPassword}
+                placeholder="••••••••"
                 className="!pl-10 !pr-10 !rounded-xl"
                 required
               />
@@ -111,33 +116,20 @@ function Login() {
             </div>
           </div>
 
-          {/* Error */}
           {error && (
-            <p className="text-sm text-red-500 mb-4 font-medium animate-pulse">
-              {error}
-            </p>
+            <p className="text-sm text-red-500 mb-4 font-medium">{error}</p>
           )}
 
-          {/* Submit Button */}
           <Button
             type="submit"
             appearance="primary"
             loading={loading}
             block
-            className="!rounded-xl !py-2 !text-base shadow-md hover:shadow-lg transition-all"
+            className="!rounded-xl !py-2 !text-base shadow-md"
           >
-            {t("Login")}
+            {t("Kirish")}
           </Button>
         </form>
-        {/* Footer */}
-        <div className="w-full flex justify-center mt-6">
-          <Link
-            to="/sign-up"
-            className="text-xs text-blue-500 hover:text-blue-700 transition-colors"
-          >
-            {t("Don't you have an account?")}
-          </Link>
-        </div>
       </div>
     </div>
   );
