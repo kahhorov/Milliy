@@ -106,6 +106,19 @@ const AddPayments = () => {
     }
   }, [showModal, selectedStudent, selectedGroupId, groups]);
 
+  // --- YANGI: KATTA RAQAMLARNI FORMATLASH ---
+  const formatLargeNumber = (num) => {
+    if (!num && num !== 0) return "0";
+
+    const number = Number(num);
+    if (number >= 1000000) {
+      return (number / 1000000).toFixed(1).replace(/\.0$/, "") + " Mln";
+    } else if (number >= 1000) {
+      return (number / 1000).toFixed(1).replace(/\.0$/, "") + " ming";
+    }
+    return number.toString();
+  };
+
   // --- ASOSIY LOGIKA: Darslarni hisoblash ---
   const calculateLessons = (createdAt, groupDays, studentId) => {
     // 1. Sana formatini to'g'irlash
@@ -173,13 +186,13 @@ const AddPayments = () => {
     let totalLessons = 12;
     let remaining = totalLessons - lessonsPassed;
 
-    // Qarzni aniqlash (qancha oylik to'lanmagan)
+    // Qarzni aniqlash (qancha dars to'lanmagan)
+    let overdueLessons = 0;
     let monthsOverdue = 0;
-    let totalOverdueLessons = 0;
 
     if (remaining < 0) {
-      totalOverdueLessons = Math.abs(remaining);
-      monthsOverdue = Math.ceil(totalOverdueLessons / 12);
+      overdueLessons = Math.abs(remaining);
+      monthsOverdue = Math.ceil(overdueLessons / 12);
     }
 
     // Agar to'lov bo'lmagan bo'lsa (yangi o'quvchi)
@@ -187,7 +200,7 @@ const AddPayments = () => {
       remaining = totalLessons - Math.min(lessonsPassed, totalLessons);
     }
 
-    // 7. STATUS ANIQLASH
+    // 7. STATUS ANIQLASH (YANGI LOGIKA: Qarzni darslar bilan ko'rsatish)
     let statusType = "waiting";
     let statusText = "";
     let statusBadgeText = "";
@@ -200,8 +213,9 @@ const AddPayments = () => {
       statusBadgeText = `${monthsOverdue} oylik to'lanmagan`;
     } else if (remaining < 0) {
       statusType = "overdue";
-      statusText = `Qarzdor (${Math.abs(remaining)})`;
-      statusBadgeText = `Qarzdor (${Math.abs(remaining)})`;
+      statusText = `Qarzdor (${Math.abs(remaining)} dars)`;
+      statusBadgeText = `Qarzdor (${Math.abs(remaining)} dars)`;
+      showPulse = true;
     } else if (remaining === 0) {
       statusType = "last";
       statusText = "0 (Oxirgi dars)";
@@ -235,6 +249,7 @@ const AddPayments = () => {
       lastPaymentDate: lastPayment ? lastPayment.date : null,
       lastAmount: lastPaymentAmount,
       monthsOverdue,
+      overdueLessons: Math.max(0, -remaining), // Qarz darslar soni
       totalLessons: 12,
     };
   };
@@ -281,8 +296,17 @@ const AddPayments = () => {
     0,
   );
 
-  // Format currency
+  // Format currency with large number formatting
   const formatCurrency = (num) => {
+    if (!num && num !== 0) return "0 UZS";
+
+    const number = Number(num);
+
+    // Katta raqamlarni formatlash
+    if (number >= 1000000) {
+      return formatLargeNumber(number) + " UZS";
+    }
+
     return new Intl.NumberFormat("uz-UZ", {
       style: "currency",
       currency: "UZS",
@@ -374,7 +398,7 @@ const AddPayments = () => {
           <StatCard
             icon={<FiDollarSign />}
             label="Jami Tushum"
-            value={formatCurrency(totalRevenue)}
+            value={formatLargeNumber(totalRevenue)}
             color="emerald"
             isMoney={true}
           />
@@ -575,11 +599,7 @@ const AddPayments = () => {
                             {info.statusType === "overdue" ||
                             info.statusType === "twoMonths" ? (
                               <span className="text-red-600">
-                                12 / 0 (Qarz:{" "}
-                                {info.monthsOverdue > 0
-                                  ? `${info.monthsOverdue} oylik`
-                                  : Math.abs(info.remaining)}
-                                )
+                                12 / 0 (Qarz: {info.overdueLessons} dars)
                               </span>
                             ) : (
                               `12 / ${info.remaining}`
