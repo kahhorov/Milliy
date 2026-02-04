@@ -22,6 +22,7 @@ function CreateGroup({ open, setOpen }) {
     const formData = new FormData(e.target);
     const getData = Object.fromEntries(formData);
     const groupname = formData.get("groupName").toLowerCase();
+    const coursePrice = formData.get("coursePrice");
 
     //
     if (!groupname || !groupname.trim()) {
@@ -31,6 +32,11 @@ function CreateGroup({ open, setOpen }) {
     }
     if (!lessonTime) {
       setText(t("Lesson time cannot be empty") + "!");
+      setNotfication(true);
+      return;
+    }
+    if (!coursePrice) {
+      setText(t("Group price cannot be empty") + "!");
       setNotfication(true);
       return;
     }

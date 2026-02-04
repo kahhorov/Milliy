@@ -42,8 +42,8 @@ function Login() {
           toast.success(t("Xush kelibsiz!"));
           navigate("/");
         } else {
-          setError(t("Login yoki parol noto'g'ri!"));
-          toast.error(t("Login yoki parol noto'g'ri!"));
+          setError(t("Incorrect login or password"));
+          toast.error(t("Incorrect login or password"));
         }
       } else {
         setError(t("Bazada admin ma'lumotlari topilmadi"));
@@ -67,14 +67,14 @@ function Login() {
           <h1
             className={`text-2xl font-semibold ${theme === "light" ? "text-gray-800" : "text-gray-200"}`}
           >
-            {t("Tizimga kirish")}
+            {t("Login")}
           </h1>
         </div>
 
         <form onSubmit={handleSubmit}>
           <div className="mb-5">
             <label className="text-sm text-gray-600 block mb-1">
-              {t("Login")}
+              {t("username")}
             </label>
             <div className="relative">
               <MdPerson className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg z-10" />
@@ -90,7 +90,7 @@ function Login() {
 
           <div className="mb-6">
             <label className="text-sm text-gray-600 block mb-1">
-              {t("Parol")}
+              {t("Password")}
             </label>
             <div className="relative">
               <MdLock className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-lg z-10" />
@@ -127,7 +127,7 @@ function Login() {
             block
             className="!rounded-xl !py-2 !text-base shadow-md"
           >
-            {t("Kirish")}
+            {t("login")}
           </Button>
         </form>
       </div>

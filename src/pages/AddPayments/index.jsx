@@ -12,13 +12,15 @@ import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import {
   FiSearch,
-  FiChevronDown,
   FiX,
-  FiAlertCircle,
   FiCreditCard,
   FiCalendar,
-  FiUser,
   FiDollarSign,
+  FiUsers,
+  FiCheckCircle,
+  FiAlertTriangle,
+  FiUserCheck,
+  FiUserX,
 } from "react-icons/fi";
 
 const AddPayments = () => {
@@ -27,14 +29,33 @@ const AddPayments = () => {
   const [students, setStudents] = useState([]);
   const [payments, setPayments] = useState([]);
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState("Barchasi");
   const [showModal, setShowModal] = useState(false);
   const [selectedStudent, setSelectedStudent] = useState(null);
   const [amount, setAmount] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [paymentDate, setPaymentDate] = useState("");
 
-  const today = new Date().toISOString().split("T")[0];
+  const today = new Date().toLocaleDateString("uz-UZ");
 
-  // Guruhlarni olish
+  // Inglizcha kunlarni raqamga o'girish
+  const dayToNumber = {
+    Sunday: 0,
+    Monday: 1,
+    Tuesday: 2,
+    Wednesday: 3,
+    Thursday: 4,
+    Friday: 5,
+    Saturday: 6,
+    Yakshanba: 0,
+    Dushanba: 1,
+    Seshanba: 2,
+    Chorshanba: 3,
+    Payshanba: 4,
+    Juma: 5,
+    Shanba: 6,
+  };
+
+  // 1. Firebase Data Fetching
   useEffect(() => {
     const unsubGroups = onSnapshot(collection(db, "groups"), (snap) => {
       setGroups(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
@@ -54,552 +75,674 @@ const AddPayments = () => {
     };
   }, []);
 
-  // Studentlarni olish
+  // 2. Fetch Group Students
   useEffect(() => {
     if (!selectedGroupId) {
       setStudents([]);
       return;
     }
-
     const unsubStudents = onSnapshot(
       collection(db, "groups", selectedGroupId, "students"),
       (snap) => {
         setStudents(snap.docs.map((doc) => ({ id: doc.id, ...doc.data() })));
       },
     );
-
     return () => unsubStudents();
   }, [selectedGroupId]);
 
-  // Hafta kunlarini raqamga o'girish
-  const dayToNumber = {
-    Dushanba: 1,
-    Seshanba: 2,
-    Chorshanba: 3,
-    Payshanba: 4,
-    Juma: 5,
-    Shanba: 6,
-    Yakshanba: 0,
-  };
+  // 3. Modal ochilganda date va summani avtomatik to'ldirish
+  useEffect(() => {
+    if (showModal && selectedStudent && selectedGroupId) {
+      // Bugungi sana
+      const today = new Date();
+      const formattedDate = today.toISOString().split("T")[0];
+      setPaymentDate(formattedDate);
 
-  // Darslar sonini hisoblash
-  const calculatePastLessons = (joinedAt, groupDays) => {
-    if (!joinedAt || !groupDays) return 0;
-
-    const startDate = new Date(joinedAt.seconds * 1000);
-    const todayDate = new Date();
-    let count = 0;
-
-    const targetDays = groupDays.map((day) => dayToNumber[day]);
-
-    for (
-      let d = new Date(startDate);
-      d <= todayDate;
-      d.setDate(d.getDate() + 1)
-    ) {
-      if (targetDays.includes(d.getDay())) {
-        count++;
+      // Group coursePrice ni olish
+      const selectedGroup = groups.find((g) => g.id === selectedGroupId);
+      if (selectedGroup && selectedGroup.coursePrice) {
+        setAmount(selectedGroup.coursePrice.toString());
       }
     }
+  }, [showModal, selectedStudent, selectedGroupId, groups]);
 
-    return count;
-  };
+  // --- ASOSIY LOGIKA: Darslarni hisoblash ---
+  const calculateLessons = (createdAt, groupDays, studentId) => {
+    // 1. Sana formatini to'g'irlash
+    let startDate;
+    if (createdAt && createdAt.seconds) {
+      startDate = new Date(createdAt.seconds * 1000);
+    } else if (createdAt) {
+      startDate = new Date(createdAt);
+    } else {
+      startDate = new Date(); // Fallback
+    }
 
-  // Qolgan darslar sonini hisoblash (12 dars)
-  const calculateRemainingLessons = (pastLessons) => {
-    return 12 - (pastLessons % 12);
-  };
+    // Soatni 00:00 ga tushiramiz
+    startDate.setHours(0, 0, 0, 0);
+    const todayDate = new Date();
+    todayDate.setHours(0, 0, 0, 0);
 
-  // Dars sikli holati
-  const getLessonStatus = (student, group) => {
-    if (!student || !group || !student.joinedAt) return {};
+    // 2. Shu o'quvchining oxirgi to'lovini topish
+    const studentPayments = payments.filter((p) => p.studentId === studentId);
+    let lastPayment = null;
+    let lastPaymentAmount = 0;
 
-    const pastLessons = calculatePastLessons(
-      student.joinedAt,
-      group.days || [],
-    );
-    const remaining = calculateRemainingLessons(pastLessons);
+    if (studentPayments.length > 0) {
+      // Sanasi bo'yicha saralash (eng yangisi birinchi)
+      studentPayments.sort((a, b) => new Date(b.date) - new Date(a.date));
+      lastPayment = studentPayments[0];
+      lastPaymentAmount = lastPayment ? Number(lastPayment.amount) : 0;
+    }
 
-    // Agar 0-dars bo'lsa (yangi sikl boshida)
-    const isNewCycle = pastLessons % 12 === 0 && pastLessons > 0;
+    // 3. Hisoblash boshi (Start Point)
+    let calculationStartDate = lastPayment
+      ? new Date(lastPayment.date)
+      : startDate;
+
+    calculationStartDate.setHours(0, 0, 0, 0);
+
+    // 4. Guruh kunlarini aniqlash
+    let targetDays = [];
+    if (!groupDays) {
+      targetDays = [];
+    } else if (
+      groupDays === "Every day" ||
+      (Array.isArray(groupDays) && groupDays.includes("Every day"))
+    ) {
+      targetDays = [1, 2, 3, 4, 5, 6];
+    } else if (Array.isArray(groupDays)) {
+      targetDays = groupDays
+        .map((day) => dayToNumber[day])
+        .filter((d) => d !== undefined);
+    }
+
+    // 5. Bugungi kungacha bo'lgan darslar sonini hisoblash
+    let lessonsPassed = 0;
+    let loopDate = new Date(calculationStartDate);
+
+    while (loopDate <= todayDate) {
+      const currentDayOfWeek = loopDate.getDay();
+      if (targetDays.includes(currentDayOfWeek)) {
+        lessonsPassed++;
+      }
+      loopDate.setDate(loopDate.getDate() + 1);
+    }
+
+    // 6. Qolgan darslarni hisoblash va oylik hisob
+    let totalLessons = 12;
+    let remaining = totalLessons - lessonsPassed;
+
+    // Qarzni aniqlash (qancha oylik to'lanmagan)
+    let monthsOverdue = 0;
+    let totalOverdueLessons = 0;
+
+    if (remaining < 0) {
+      totalOverdueLessons = Math.abs(remaining);
+      monthsOverdue = Math.ceil(totalOverdueLessons / 12);
+    }
+
+    // Agar to'lov bo'lmagan bo'lsa (yangi o'quvchi)
+    if (!lastPayment) {
+      remaining = totalLessons - Math.min(lessonsPassed, totalLessons);
+    }
+
+    // 7. STATUS ANIQLASH
+    let statusType = "waiting";
+    let statusText = "";
+    let statusBadgeText = "";
+    let showPulse = false;
+    let showPulseLast = false;
+
+    if (monthsOverdue >= 2) {
+      statusType = "twoMonths";
+      statusText = `${monthsOverdue} oylik to'lanmagan`;
+      statusBadgeText = `${monthsOverdue} oylik to'lanmagan`;
+    } else if (remaining < 0) {
+      statusType = "overdue";
+      statusText = `Qarzdor (${Math.abs(remaining)})`;
+      statusBadgeText = `Qarzdor (${Math.abs(remaining)})`;
+    } else if (remaining === 0) {
+      statusType = "last";
+      statusText = "0 (Oxirgi dars)";
+      statusBadgeText = "Oxirgi dars";
+      showPulseLast = true;
+    } else if (remaining === 1) {
+      statusType = "danger";
+      statusText = `1 (Oxirgi dars)`;
+      statusBadgeText = "Oxirgi dars";
+      showPulseLast = true;
+    } else if (remaining <= 3) {
+      statusType = "warning";
+      statusText = `${remaining} (To'lov boshlandi)`;
+      statusBadgeText = "To'lov boshlandi";
+      showPulse = true;
+    } else {
+      statusType = "waiting";
+      statusText = `${remaining}`;
+      statusBadgeText = "Kutilmoqda";
+    }
 
     return {
-      pastLessons,
-      remainingLessons: remaining,
-      isNewCycle,
-      isLastLesson: remaining === 1,
-      isFirstLesson: pastLessons === 0,
+      remaining,
+      lessonsPassed: Math.min(lessonsPassed, totalLessons),
+      statusType,
+      statusText,
+      statusBadgeText,
+      showPulse,
+      showPulseLast,
+      hasPaymentHistory: !!lastPayment,
+      lastPaymentDate: lastPayment ? lastPayment.date : null,
+      lastAmount: lastPaymentAmount,
+      monthsOverdue,
+      totalLessons: 12,
     };
   };
 
-  // Izoh matnini yaratish
-  const getCommentText = (student, group) => {
-    const status = getLessonStatus(student, group);
+  // --- STATISTIKA ---
+  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
 
-    if (status.isFirstLesson) {
-      return "To'lov kuni: har oyning 7-sanasi";
-    }
+  const calculatedStudents = students.map((s) => {
+    const info = calculateLessons(s.createdAt, selectedGroup?.days, s.id);
+    return { ...s, info };
+  });
 
-    if (status.isLastLesson) {
-      return "4-darsdan keyin to'lov";
-    }
+  // To'langan studentlar (oxirgi to'lovi bo'lgan)
+  const paidStudents = calculatedStudents.filter(
+    (s) => s.info.hasPaymentHistory,
+  );
 
-    if (status.isNewCycle) {
-      return "Yangi dastur boshlandi";
-    }
+  // To'lanmagan studentlar (hech qanday to'lovi bo'lmagan)
+  const unpaidStudents = calculatedStudents.filter(
+    (s) => !s.info.hasPaymentHistory,
+  );
 
-    if (status.remainingLessons <= 3) {
-      return `${status.remainingLessons} ta dars qoldi`;
-    }
+  // Kutilmoqda studentlar (4+ dars qolgan)
+  const waitingStudents = calculatedStudents.filter(
+    (s) => s.info.statusType === "waiting",
+  );
 
-    return "To'lov kuni: har oyning 7-sanasi";
+  // To'lov boshlandi studentlar (2-3 dars qolgan)
+  const paymentStartedStudents = calculatedStudents.filter(
+    (s) => s.info.statusType === "warning",
+  );
+
+  // Qarzdor talabalar
+  const overdueStudents = calculatedStudents.filter(
+    (s) => s.info.statusType === "overdue" || s.info.statusType === "twoMonths",
+  );
+
+  // Jami tushum - BARCHA to'lovlar (faqat tanlangan guruh uchun)
+  const allPaymentsForGroup = payments.filter(
+    (p) => p.groupId === selectedGroupId,
+  );
+  const totalRevenue = allPaymentsForGroup.reduce(
+    (acc, curr) => acc + Number(curr.amount),
+    0,
+  );
+
+  // Format currency
+  const formatCurrency = (num) => {
+    return new Intl.NumberFormat("uz-UZ", {
+      style: "currency",
+      currency: "UZS",
+      minimumFractionDigits: 0,
+    }).format(num);
   };
 
-  // To'lov qo'shish
-  const handlePayment = async () => {
-    if (!amount || Number(amount) <= 0) {
-      return toast.error("Summani kiriting!");
-    }
+  // O'tgan oyning sanasini olish
+  const getLastMonthDate = () => {
+    const today = new Date();
+    const lastMonth = new Date(
+      today.getFullYear(),
+      today.getMonth() - 1,
+      today.getDate(),
+    );
+    return lastMonth.toISOString().split("T")[0];
+  };
 
+  // To'lov qilish
+  const handlePayment = async () => {
+    if (!amount || Number(amount) <= 0) return toast.error("Summani kiriting!");
+    if (!paymentDate) return toast.error("Sanani tanlang!");
+
+    setLoading(true);
     try {
       await addDoc(collection(db, "payments"), {
         studentId: selectedStudent.id,
-        studentName:
-          `${selectedStudent.firstName || ""} ${selectedStudent.lastName || ""}`.trim(),
+        studentName: (
+          selectedStudent.studentName ||
+          `${selectedStudent.firstName} ${selectedStudent.lastName}`
+        ).trim(),
         groupId: selectedGroupId,
-        groupName:
-          groups.find((g) => g.id === selectedGroupId)?.groupName ||
-          groups.find((g) => g.id === selectedGroupId)?.name,
+        groupName: selectedGroup?.groupName || "Noma'lum",
         amount: Number(amount),
-        date: today,
+        date: paymentDate,
         createdAt: serverTimestamp(),
       });
-
-      toast.success("To'lov saqlandi!");
+      toast.success("To'lov muvaffaqiyatli qabul qilindi!");
       setShowModal(false);
       setAmount("");
-      setSelectedStudent(null);
+      setPaymentDate("");
     } catch (e) {
-      toast.error("Xatolik!");
+      toast.error("Xatolik: " + e.message);
+    } finally {
+      setLoading(false);
     }
   };
 
-  // Statistik ma'lumotlar
-  const currentPayments = selectedGroupId
-    ? payments.filter((p) => p.groupId === selectedGroupId)
-    : [];
-  const selectedGroup = groups.find((g) => g.id === selectedGroupId);
-
-  const totalStudents = students.length;
-  const paidStudents = new Set(currentPayments.map((p) => p.studentId)).size;
-  const unpaidStudents = totalStudents - paidStudents;
-  const totalIncome = currentPayments.reduce((sum, p) => sum + p.amount, 0);
-
   return (
-    <div className="min-h-screen bg-gray-50 p-6">
-      <ToastContainer />
+    <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-8 font-sans text-slate-900">
+      <ToastContainer position="top-right" autoClose={2000} />
 
-      {/* HEADER */}
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-gray-900 mb-2">To'lovlar</h1>
-        <p className="text-gray-600">To'lovlarni nazorat qilish va kuzatish</p>
-      </div>
-
-      {/* STATISTICS - RASMDAGI KO'RINISHDA */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <p className="text-gray-500 text-sm mb-2">Jami</p>
-          <p className="text-2xl font-bold text-gray-900">{totalStudents}</p>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <p className="text-gray-500 text-sm mb-2">To'langan</p>
-          <p className="text-2xl font-bold text-green-600">{paidStudents}</p>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <p className="text-gray-500 text-sm mb-2">To'lanmagan</p>
-          <p className="text-2xl font-bold text-red-600">{unpaidStudents}</p>
-        </div>
-
-        <div className="bg-white p-6 rounded-xl border border-gray-200">
-          <p className="text-gray-500 text-sm mb-2">Jami tushum</p>
-          <p className="text-2xl font-bold text-blue-600">
-            {totalIncome.toLocaleString()} so'm
+      {/* Header */}
+      <div className="mb-10">
+        <div className="lg:col-span-1 flex flex-col justify-center">
+          <h1 className="text-3xl font-black tracking-tight text-slate-800">
+            To'lovlar
+          </h1>
+          <p className="text-slate-500 flex items-center gap-2 mt-1 font-medium">
+            <FiCalendar className="text-blue-500" /> {today}
           </p>
         </div>
-      </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-6 gap-6 mt-5">
+          <StatCard
+            icon={<FiUsers />}
+            label="O'quvchilar"
+            value={students.length}
+            color="blue"
+          />
+          <StatCard
+            icon={<FiUserCheck />}
+            label="To'langan"
+            value={paidStudents.length}
+            color="green"
+          />
+          <StatCard
+            icon={<FiUserX />}
+            label="To'lanmagan"
+            value={unpaidStudents.length}
+            color="orange"
+          />
 
-      {/* FILTERS */}
-      <div className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-        <div className="flex flex-col lg:flex-row gap-4 items-center">
-          {/* Search */}
-          <div className="relative flex-1 w-full">
-            <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" />
-            <input
-              type="text"
-              placeholder="O'quvchi yoki guruh bo'yicha qidirish..."
-              className="w-full bg-gray-50 border border-gray-300 rounded-lg py-3 pl-12 pr-4 outline-none focus:border-blue-500 text-sm"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-            />
-          </div>
-
-          {/* Group Select - RASMDAGI KABI */}
-          <div className="relative w-full lg:w-64">
-            <select
-              value={selectedGroupId}
-              onChange={(e) => {
-                setSelectedGroupId(e.target.value);
-                setActiveTab("Barchasi");
-              }}
-              className="w-full bg-white border border-gray-300 text-gray-700 rounded-lg py-3 px-4 pr-10 outline-none appearance-none"
-            >
-              <option value="">Guruhni tanlang</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.groupName || g.name}
-                </option>
-              ))}
-            </select>
-            <FiChevronDown className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
-          </div>
-
-          {/* Tabs */}
-          <div className="flex bg-gray-100 rounded-lg p-1">
-            {["Barchasi", "To'langan", "To'lanmagan"].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-4 py-2 rounded-md text-sm font-medium ${activeTab === tab ? "bg-white shadow-sm text-gray-900" : "text-gray-600"}`}
-              >
-                {tab}
-              </button>
-            ))}
-          </div>
+          <StatCard
+            icon={<FiAlertTriangle />}
+            label="Qarzdorlar"
+            value={overdueStudents.length}
+            color="red"
+          />
+          <StatCard
+            icon={<FiDollarSign />}
+            label="Jami Tushum"
+            value={formatCurrency(totalRevenue)}
+            color="emerald"
+            isMoney={true}
+          />
         </div>
       </div>
 
-      {/* MAIN CONTENT */}
-      <div>
+      {/* Filter */}
+      <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-4 mb-8 flex flex-col md:flex-row gap-4">
+        <div className="relative flex-1">
+          <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input
+            type="text"
+            placeholder="O'quvchi ismini qidiring..."
+            className="w-full bg-slate-50 border-none rounded-2xl py-4 pl-12 pr-4 outline-none focus:ring-2 focus:ring-blue-500/10 transition-all font-medium"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+          />
+        </div>
+        <select
+          value={selectedGroupId}
+          onChange={(e) => setSelectedGroupId(e.target.value)}
+          className="w-full md:w-72 bg-slate-50 border-none rounded-2xl py-4 px-5 outline-none font-bold text-slate-700 cursor-pointer hover:bg-slate-100 transition-colors"
+        >
+          <option value="">Guruhni tanlang...</option>
+          {groups.map((g) => (
+            <option key={g.id} value={g.id}>
+              {g.groupName || g.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Table */}
+      <div className="bg-white rounded-[32px] shadow-xl border border-slate-200 overflow-hidden">
         {!selectedGroupId ? (
-          // Guruh tanlanmagan holat
-          <div className="bg-white rounded-xl border border-gray-200 p-16 text-center">
-            <FiAlertCircle className="text-gray-400 text-5xl mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              Guruh tanlanmagan
-            </h3>
-            <p className="text-gray-600">
-              Ma'lumotlarni ko'rish uchun guruhni tanlang
-            </p>
-          </div>
-        ) : students.length === 0 ? (
-          // Studentlar yo'q
-          <div className="bg-white rounded-xl border border-gray-200 p-16 text-center">
-            <FiUser className="text-blue-500 text-5xl mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 mb-2">
-              O'quvchilar topilmadi
-            </h3>
-            <p className="text-gray-600">
-              {selectedGroup?.groupName} guruhida o'quvchilar yo'q
-            </p>
-          </div>
+          <EmptyState />
         ) : (
-          // TABLE - RASMDAGI KO'RINISHDA
-          <div className="bg-white rounded-xl border border-gray-200 overflow-hidden">
-            <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead className="bg-gray-50 border-b border-gray-200">
-                  <tr>
-                    <th className="py-4 px-6 text-left text-gray-600 font-medium text-sm uppercase tracking-wider">
-                      O'quvchi
-                    </th>
-                    <th className="py-4 px-6 text-left text-gray-600 font-medium text-sm uppercase tracking-wider">
-                      Guruh
-                    </th>
-                    <th className="py-4 px-6 text-left text-gray-600 font-medium text-sm uppercase tracking-wider">
-                      Darslar
-                    </th>
-                    <th className="py-4 px-6 text-left text-gray-600 font-medium text-sm uppercase tracking-wider">
-                      Izoh
-                    </th>
-                    <th className="py-4 px-6 text-left text-gray-600 font-medium text-sm uppercase tracking-wider">
-                      Holati
-                    </th>
-                    <th className="py-4 px-6 text-left text-gray-600 font-medium text-sm uppercase tracking-wider">
-                      Amal
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {students
-                    .filter((student) => {
-                      // Search
-                      const fullName =
-                        `${student.firstName || ""} ${student.lastName || ""}`.trim();
-                      const searchMatch =
-                        fullName
-                          .toLowerCase()
-                          .includes(searchQuery.toLowerCase()) ||
-                        (student.phoneNumber || "").includes(searchQuery);
+          <div className="overflow-x-auto">
+            <table className="w-full text-left border-collapse">
+              <thead className="bg-slate-50/50 border-b border-slate-100">
+                <tr className="text-[10px] uppercase text-slate-400 font-black tracking-widest">
+                  <th className="py-6 px-8">O'quvchi</th>
+                  <th className="py-6 px-6 text-center">Darslar (Qolgan)</th>
+                  <th className="py-6 px-6 text-center">Status</th>
+                  <th className="py-6 px-8 text-center">Oxirgi to'lov</th>
+                  <th className="py-6 px-8 text-right">Amal</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-50">
+                {calculatedStudents
+                  .filter((s) =>
+                    (s.studentName || `${s.firstName} ${s.lastName}`)
+                      .toLowerCase()
+                      .includes(searchQuery.toLowerCase()),
+                  )
+                  .map((student) => {
+                    const info = student.info;
 
-                      // Status filter
-                      const hasPayment = currentPayments.find(
-                        (p) => p.studentId === student.id,
-                      );
-                      if (activeTab === "To'langan")
-                        return searchMatch && hasPayment;
-                      if (activeTab === "To'lanmagan")
-                        return searchMatch && !hasPayment;
-                      return searchMatch;
-                    })
-                    .map((student) => {
-                      const payment = currentPayments.find(
-                        (p) => p.studentId === student.id,
-                      );
-                      const lessonStatus = getLessonStatus(
-                        student,
-                        selectedGroup,
-                      );
-                      const isOverdue =
-                        lessonStatus.remainingLessons === 0 && !payment;
+                    // Styles Logic
+                    let rowBgClass = "";
+                    let statusBadgeClass = "";
+                    let actionBtnClass = "";
+                    let progressColor = "";
+                    let avatarColor = "";
+                    let dotColor = "";
+                    let pulseClass = "";
+                    let badgeText = info.statusBadgeText;
+                    let statusIconColor = "";
 
-                      // Telefon raqami format
-                      const phone = student.phoneNumber || "";
-                      const formattedPhone =
-                        phone.length === 9
-                          ? `${phone.slice(0, 3)} ${phone.slice(3, 5)} ${phone.slice(5, 7)} ${phone.slice(7)}`
-                          : phone;
+                    switch (info.statusType) {
+                      case "twoMonths":
+                        rowBgClass = "bg-red-50 border-red-200";
+                        statusBadgeClass =
+                          "bg-red-500 text-white border-red-500";
+                        actionBtnClass =
+                          "bg-red-100 text-red-600 border-red-200";
+                        progressColor = "bg-red-500";
+                        avatarColor = "bg-red-500";
+                        dotColor = "bg-white";
+                        pulseClass = "animate-pulse";
+                        statusIconColor = "text-red-600";
+                        break;
+                      case "overdue":
+                        rowBgClass = "bg-red-50 border-red-100";
+                        statusBadgeClass =
+                          "bg-red-500 text-white border-red-500";
+                        actionBtnClass =
+                          "bg-red-100 text-red-600 border-red-200";
+                        progressColor = "bg-red-500";
+                        avatarColor = "bg-red-500";
+                        dotColor = "bg-white";
+                        pulseClass = "animate-pulse";
+                        statusIconColor = "text-red-600";
+                        break;
+                      case "last":
+                        rowBgClass = "bg-red-50 border-red-100";
+                        statusBadgeClass =
+                          "bg-red-500 text-white border-red-500";
+                        actionBtnClass =
+                          "bg-red-100 text-red-600 border-red-200";
+                        progressColor = "bg-red-500";
+                        avatarColor = "bg-red-500";
+                        dotColor = "bg-white";
+                        pulseClass = info.showPulseLast ? "animate-pulse" : "";
+                        statusIconColor = "text-red-600";
+                        badgeText = "Oxirgi dars";
+                        break;
+                      case "danger":
+                        rowBgClass = "bg-red-50 border-red-100";
+                        statusBadgeClass =
+                          "bg-red-500 text-white border-red-500";
+                        actionBtnClass =
+                          "bg-red-100 text-red-600 border-red-200";
+                        progressColor = "bg-red-500";
+                        avatarColor = "bg-red-500";
+                        dotColor = "bg-white";
+                        pulseClass = info.showPulseLast ? "animate-pulse" : "";
+                        statusIconColor = "text-red-600";
+                        badgeText = "Oxirgi dars";
+                        break;
+                      case "warning":
+                        rowBgClass = "bg-orange-50/50";
+                        statusBadgeClass =
+                          "bg-orange-500 text-white border-orange-500";
+                        actionBtnClass =
+                          "bg-orange-100 text-orange-600 border-orange-200";
+                        progressColor = "bg-orange-500";
+                        avatarColor = "bg-orange-500";
+                        dotColor = "bg-white";
+                        pulseClass = info.showPulse ? "animate-pulse" : "";
+                        statusIconColor = "text-orange-600";
+                        badgeText = "To'lov boshlandi";
+                        break;
+                      case "waiting":
+                        rowBgClass = "hover:bg-slate-50/50 bg-white";
+                        statusBadgeClass =
+                          "bg-blue-500 text-white border-blue-500";
+                        actionBtnClass =
+                          "bg-blue-50 text-blue-600 border-blue-100";
+                        progressColor = "bg-blue-500";
+                        avatarColor = "bg-blue-500";
+                        dotColor = "bg-white";
+                        statusIconColor = "text-blue-600";
+                        badgeText = "Kutilmoqda";
+                        break;
+                      default:
+                        rowBgClass = "hover:bg-slate-50/50 bg-white";
+                        statusBadgeClass =
+                          "bg-blue-500 text-white border-blue-500";
+                        actionBtnClass =
+                          "bg-blue-50 text-blue-600 border-blue-100";
+                        progressColor = "bg-blue-500";
+                        avatarColor = "bg-blue-500";
+                        dotColor = "bg-white";
+                        statusIconColor = "text-blue-600";
+                        break;
+                    }
 
-                      return (
-                        <tr
-                          key={student.id}
-                          className={`border-b border-gray-100 ${isOverdue ? "bg-red-50" : ""}`}
-                        >
-                          {/* O'quvchi */}
-                          <td className="py-4 px-6">
+                    // Agar to'lov bo'lsa, statusni "To'langan" qilamiz
+                    if (info.hasPaymentHistory && info.lastAmount > 0) {
+                      badgeText = `To'langan (${formatCurrency(info.lastAmount)})`;
+                      statusBadgeClass =
+                        "bg-emerald-500 text-white border-emerald-500";
+                      dotColor = "bg-white";
+                      statusIconColor = "text-emerald-600";
+                    }
+
+                    return (
+                      <tr
+                        key={student.id}
+                        className={`transition-all duration-300 border-b ${rowBgClass}`}
+                      >
+                        <td className="py-5 px-8">
+                          <div className="flex items-center gap-4">
+                            <div
+                              className={`w-12 h-12 rounded-2xl flex items-center justify-center text-white font-bold shadow-sm uppercase ${avatarColor}`}
+                            >
+                              {(
+                                student.studentName ||
+                                student.firstName ||
+                                "?"
+                              ).charAt(0)}
+                            </div>
                             <div>
-                              <div className="font-medium text-gray-900">
-                                {student.firstName} {student.lastName}
-                              </div>
-                              <div className="text-sm text-gray-500 mt-1">
-                                {formattedPhone}
-                              </div>
+                              <p className="font-bold text-slate-800">
+                                {student.studentName ||
+                                  `${student.firstName} ${student.lastName}`}
+                              </p>
+                              <p className="text-xs text-slate-400 font-medium">
+                                {student.phoneNumber}
+                              </p>
                             </div>
-                          </td>
+                          </div>
+                        </td>
 
-                          {/* Guruh */}
-                          <td className="py-4 px-6">
-                            <span className="inline-block px-3 py-1 bg-blue-100 text-blue-800 rounded-md text-sm font-medium">
-                              {selectedGroup?.groupName}
-                            </span>
-                          </td>
-
-                          {/* Darslar */}
-                          <td className="py-4 px-6">
-                            <div className="text-gray-900 font-medium">
-                              {lessonStatus.pastLessons} ta
-                            </div>
-                          </td>
-
-                          {/* Izoh */}
-                          <td className="py-4 px-6">
-                            <div className="text-gray-600 text-sm">
-                              {getCommentText(student, selectedGroup)}
-                            </div>
-                          </td>
-
-                          {/* Holati - RASMDAGI KABI */}
-                          <td className="py-4 px-6">
-                            {payment ? (
-                              <div>
-                                <span className="inline-block px-3 py-1 bg-green-100 text-green-800 rounded-md text-sm font-medium mb-1">
-                                  To'langan
-                                </span>
-                                <div className="text-green-700 font-semibold">
-                                  {payment.amount.toLocaleString()} so'm
-                                </div>
-                              </div>
-                            ) : isOverdue ? (
-                              <div>
-                                <span className="inline-block px-3 py-1 bg-red-100 text-red-800 rounded-md text-sm font-medium mb-1">
-                                  Muddat tugadi
-                                </span>
-                                <div className="text-red-600 text-sm">
-                                  To'lov qilinmagan
-                                </div>
-                              </div>
+                        <td className="py-5 px-6 text-center">
+                          <div className="text-sm font-black text-slate-700 mb-1">
+                            {info.statusType === "overdue" ||
+                            info.statusType === "twoMonths" ? (
+                              <span className="text-red-600">
+                                12 / 0 (Qarz:{" "}
+                                {info.monthsOverdue > 0
+                                  ? `${info.monthsOverdue} oylik`
+                                  : Math.abs(info.remaining)}
+                                )
+                              </span>
                             ) : (
-                              <span className="inline-block px-3 py-1 bg-red-100 text-red-800 rounded-md text-sm font-medium">
-                                To'lanmagan
+                              `12 / ${info.remaining}`
+                            )}
+                          </div>
+                          <div className="w-24 h-1.5 bg-slate-200 rounded-full mx-auto overflow-hidden">
+                            <div
+                              className={`h-full ${progressColor}`}
+                              style={{
+                                width: `${(info.lessonsPassed / 12) * 100}%`,
+                              }}
+                            ></div>
+                          </div>
+                        </td>
+
+                        <td className="py-5 px-6 text-center">
+                          <div
+                            className={`inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border text-[11px] font-black uppercase tracking-wider ${statusBadgeClass} ${pulseClass}`}
+                          >
+                            <div className="relative flex items-center">
+                              <span
+                                className={`w-2 h-2 rounded-full ${dotColor}`}
+                              ></span>
+                              {(info.showPulse || info.showPulseLast) && (
+                                <span className="absolute top-0 left-0 w-2 h-2 rounded-full bg-white animate-ping opacity-70"></span>
+                              )}
+                            </div>
+                            <span>{badgeText}</span>
+                          </div>
+                        </td>
+
+                        <td className="py-5 px-8 text-center">
+                          <div className="text-sm font-medium text-slate-600">
+                            {info.hasPaymentHistory ? (
+                              <>
+                                <div className="font-bold">
+                                  {formatCurrency(info.lastAmount)}
+                                </div>
+                                <div className="text-xs text-slate-400">
+                                  {info.lastPaymentDate
+                                    ? new Date(
+                                        info.lastPaymentDate,
+                                      ).toLocaleDateString("uz-UZ")
+                                    : "Noma'lum"}
+                                </div>
+                              </>
+                            ) : (
+                              <span className="text-slate-400 italic">
+                                To'lov yo'q
                               </span>
                             )}
-                          </td>
+                          </div>
+                        </td>
 
-                          {/* Amal */}
-                          <td className="py-4 px-6">
-                            <button
-                              onClick={() => {
-                                setSelectedStudent(student);
-                                setShowModal(true);
-                              }}
-                              className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
-                            >
-                              <FiDollarSign size={16} />
-                              To'lov qo'shish
-                            </button>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                </tbody>
-              </table>
-
-              {/* No results */}
-              {students.filter((student) => {
-                const fullName =
-                  `${student.firstName || ""} ${student.lastName || ""}`.trim();
-                const searchMatch =
-                  fullName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                  (student.phoneNumber || "").includes(searchQuery);
-
-                const hasPayment = currentPayments.find(
-                  (p) => p.studentId === student.id,
-                );
-                if (activeTab === "To'langan") return searchMatch && hasPayment;
-                if (activeTab === "To'lanmagan")
-                  return searchMatch && !hasPayment;
-                return searchMatch;
-              }).length === 0 && (
-                <div className="py-12 text-center text-gray-600">
-                  Hech narsa topilmadi
-                </div>
-              )}
-            </div>
+                        <td className="py-5 px-8 text-right">
+                          <button
+                            onClick={() => {
+                              setSelectedStudent(student);
+                              setShowModal(true);
+                              if (
+                                info.statusType === "overdue" ||
+                                info.statusType === "twoMonths"
+                              ) {
+                                setPaymentDate(getLastMonthDate());
+                              }
+                            }}
+                            className={`p-3 rounded-2xl border transition-all shadow-sm hover:scale-110 active:scale-95 ${actionBtnClass}`}
+                            title="To'lov qilish"
+                          >
+                            <FiDollarSign
+                              size={18}
+                              className={statusIconColor}
+                            />
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>
 
-      {/* MODAL - TO'LOV QO'SHISH */}
-      {showModal && selectedStudent && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl w-full max-w-md">
-            <div className="p-6">
-              {/* Header */}
-              <div className="flex justify-between items-center mb-6">
-                <h3 className="text-xl font-bold text-gray-900">
-                  To'lov qo'shish
-                </h3>
-                <button
-                  onClick={() => {
-                    setShowModal(false);
-                    setSelectedStudent(null);
-                    setAmount("");
-                  }}
-                  className="text-gray-400 hover:text-gray-600"
-                >
-                  <FiX size={24} />
-                </button>
+      {/* Payment Modal */}
+      {showModal && (
+        <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-[40px] w-full max-w-md p-10 shadow-2xl animate-in zoom-in duration-200">
+            <div className="flex justify-between items-center mb-8">
+              <h3 className="text-2xl font-black text-slate-800">
+                To'lov Qabul Qilish
+              </h3>
+              <button
+                onClick={() => setShowModal(false)}
+                className="p-2 hover:bg-slate-100 rounded-full text-slate-400"
+              >
+                <FiX size={24} />
+              </button>
+            </div>
+            <div className="space-y-6">
+              <div className="bg-slate-50 p-5 rounded-[24px] border border-slate-100">
+                <p className="text-[10px] text-slate-400 font-black uppercase tracking-widest mb-1">
+                  O'quvchi
+                </p>
+                <p className="font-bold text-lg text-slate-700">
+                  {selectedStudent?.studentName ||
+                    `${selectedStudent?.firstName} ${selectedStudent?.lastName}`}
+                </p>
+                <p className="text-xs text-blue-500 mt-1 font-medium">
+                  To'lov qilinganda hisob 12 talik yangi siklga o'tadi.
+                </p>
               </div>
 
-              {/* Content */}
-              <div className="space-y-4">
-                {/* Student info */}
-                <div className="bg-gray-50 p-4 rounded-lg">
-                  <div className="text-sm text-gray-500 mb-1">O'quvchi</div>
-                  <div className="font-semibold text-gray-900">
-                    {selectedStudent.firstName} {selectedStudent.lastName}
-                  </div>
-                  <div className="text-sm text-gray-600 mt-1">
-                    {selectedGroup?.groupName} guruhi
-                  </div>
-                </div>
-
-                {/* Amount */}
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">
-                    To'lov miqdori (so'm)
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="number"
-                      value={amount}
-                      onChange={(e) => setAmount(e.target.value)}
-                      className="w-full border border-gray-300 rounded-lg p-4 pr-12 outline-none focus:border-blue-500 text-lg font-semibold"
-                      placeholder="0"
-                    />
-                    <span className="absolute right-4 top-1/2 -translate-y-1/2 text-gray-500">
-                      so'm
-                    </span>
-                  </div>
-                </div>
-
-                {/* Date */}
-                <div className="bg-blue-50 p-4 rounded-lg flex items-center gap-3">
-                  <FiCalendar className="text-blue-500" />
-                  <div>
-                    <div className="text-sm text-blue-700">Sana</div>
-                    <div className="font-semibold text-blue-900">{today}</div>
-                  </div>
-                </div>
-
-                {/* Darslar holati */}
-                {selectedGroup && selectedStudent.joinedAt && (
-                  <div className="bg-gray-50 p-4 rounded-lg">
-                    <div className="text-sm text-gray-500 mb-2">
-                      Darslar holati
-                    </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div>
-                        <div className="text-sm text-gray-600">
-                          O'tgan darslar
-                        </div>
-                        <div className="font-semibold text-gray-900">
-                          {calculatePastLessons(
-                            selectedStudent.joinedAt,
-                            selectedGroup.days || [],
-                          )}{" "}
-                          ta
-                        </div>
-                      </div>
-                      <div>
-                        <div className="text-sm text-gray-600">
-                          Qolgan darslar
-                        </div>
-                        <div className="font-semibold text-gray-900">
-                          {calculateRemainingLessons(
-                            calculatePastLessons(
-                              selectedStudent.joinedAt,
-                              selectedGroup.days || [],
-                            ),
-                          )}{" "}
-                          ta
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Buttons */}
-                <div className="flex gap-3 pt-4">
-                  <button
-                    onClick={() => {
-                      setShowModal(false);
-                      setSelectedStudent(null);
-                      setAmount("");
-                    }}
-                    className="flex-1 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
-                  >
-                    Bekor qilish
-                  </button>
-                  <button
-                    onClick={handlePayment}
-                    className="flex-1 py-3 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
-                  >
-                    Saqlash
-                  </button>
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-3 ml-1">
+                  To'lov sanasi
+                </label>
+                <div className="relative">
+                  <FiCalendar
+                    className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300"
+                    size={20}
+                  />
+                  <input
+                    type="date"
+                    value={paymentDate}
+                    onChange={(e) => setPaymentDate(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-transparent rounded-[24px] py-5 pl-14 pr-6 outline-none focus:border-blue-500 focus:bg-white text-base font-medium transition-all"
+                  />
                 </div>
               </div>
+
+              <div>
+                <label className="block text-[10px] font-black text-slate-400 uppercase mb-3 ml-1">
+                  Summa (UZS)
+                </label>
+                <div className="relative">
+                  <FiCreditCard
+                    className="absolute left-5 top-1/2 -translate-y-1/2 text-slate-300"
+                    size={20}
+                  />
+                  <input
+                    type="number"
+                    value={amount}
+                    onChange={(e) => setAmount(e.target.value)}
+                    className="w-full bg-slate-50 border-2 border-transparent rounded-[24px] py-5 pl-14 pr-6 outline-none focus:border-blue-500 focus:bg-white text-2xl font-black transition-all"
+                    placeholder="0"
+                    autoFocus
+                  />
+                </div>
+                <p className="text-xs text-slate-500 mt-2 ml-1">
+                  Kurs narxi:{" "}
+                  {selectedGroup?.coursePrice
+                    ? formatCurrency(selectedGroup.coursePrice)
+                    : "Belgilanmagan"}
+                </p>
+              </div>
+              <button
+                disabled={loading}
+                onClick={handlePayment}
+                className="w-full py-5 bg-blue-600 text-white rounded-[24px] font-black text-lg shadow-xl hover:bg-blue-700 transition-all transform active:scale-95 disabled:opacity-50"
+              >
+                {loading ? "Saqlanmoqda..." : "Tasdiqlash"}
+              </button>
             </div>
           </div>
         </div>
@@ -607,5 +750,69 @@ const AddPayments = () => {
     </div>
   );
 };
+
+// Yordamchi komponentlar
+const StatCard = ({ icon, label, value, color, isMoney }) => {
+  const bgColors = {
+    blue: "bg-blue-50",
+    green: "bg-emerald-50",
+    orange: "bg-orange-50",
+    indigo: "bg-indigo-50",
+    red: "bg-red-50",
+    emerald: "bg-emerald-50",
+  };
+
+  const borderColors = {
+    blue: "border-blue-100",
+    green: "border-emerald-100",
+    orange: "border-orange-100",
+    indigo: "border-indigo-100",
+    red: "border-red-100",
+    emerald: "border-emerald-100",
+  };
+
+  const iconColors = {
+    blue: "text-blue-600",
+    green: "text-emerald-600",
+    orange: "text-orange-600",
+    indigo: "text-indigo-600",
+    red: "text-red-600",
+    emerald: "text-emerald-600",
+  };
+
+  return (
+    <div
+      className={`bg-white p-6 rounded-3xl border ${borderColors[color]} shadow-sm flex items-center gap-5 transition-transform hover:scale-[1.02]`}
+    >
+      <div
+        className={`p-4 rounded-2xl ${bgColors[color]} ${iconColors[color]}`}
+      >
+        {icon}
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-[10px] text-slate-400 uppercase font-black tracking-wider truncate">
+          {label}
+        </p>
+        <p
+          className={`${isMoney ? "text-xl" : "text-2xl"} font-black text-slate-800 truncate`}
+        >
+          {value}
+        </p>
+      </div>
+    </div>
+  );
+};
+
+const EmptyState = () => (
+  <div className="py-32 text-center text-slate-400">
+    <div className="bg-slate-50 w-20 h-20 rounded-full flex items-center justify-center mx-auto mb-6">
+      <FiUsers size={32} className="opacity-20" />
+    </div>
+    <p className="font-bold text-lg">Guruh tanlanmagan</p>
+    <p className="text-sm font-medium opacity-60">
+      Ro'yxatni ko'rish uchun yuqoridan guruhni tanlang
+    </p>
+  </div>
+);
 
 export default AddPayments;

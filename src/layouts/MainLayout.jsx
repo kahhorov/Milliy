@@ -123,7 +123,7 @@ const MainLayout = () => {
             padding: "0px 8px",
             position: "sticky",
             top: "10px",
-            zIndex: "100",
+            zIndex: "10",
           }}
         >
           {/* Navbar */}

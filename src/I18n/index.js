@@ -124,7 +124,7 @@ const resources = {
       "Enter your password": "Enter your password",
       "Don't you have an account?": "Don't you have an account?",
       "You have successfully logged in": "You have successfully logged in!",
-      "Incorrect email or password": "Incorrect email or password",
+      "Incorrect login or password": "Incorrect login or password",
       "Create account": "Create account",
       "Email verified successfully": "Email verified successfully",
       "Create a new account": "Create a new account",
@@ -188,6 +188,9 @@ const resources = {
       error_deleting_student: "Error deleting student",
       error_loading_group_data: "Error loading group data",
       Everyday: "Every day",
+      login: "Login",
+      username: "Username",
+      "Course price cannot be empty": "Course price cannot be empty",
     },
   },
   uz: {
@@ -312,7 +315,7 @@ const resources = {
       "Don't you have an account?": "Hisobingiz yo'qmi?",
       "You have successfully logged in":
         "Siz tizimga muvaffaqiyatli kirdingiz!",
-      "Incorrect email or password": "Noto'g'ri elektron pochta yoki parol",
+      "Incorrect login or password": "Noto'g'ri foydlanuvchi nomi yoki parol",
       "Create account": "Hisob yaratish",
       "Email verified successfully":
         "Elektron pochta muvaffaqiyatli tasdiqlandi",
@@ -378,6 +381,9 @@ const resources = {
       error_deleting_student: "O'quvchini o'chirishda xatolik",
       error_loading_group_data: "Guruh ma'lumotlarini yuklashda xatolik",
       Everyday: "Har kuni",
+      login: "Kirish",
+      username: "Foydalanuvchi nomi",
+      "Course price cannot be empty": "Kurs narxi bo'sh bolmasin",
     },
   },
 };

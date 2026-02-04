@@ -38,12 +38,17 @@ const CreateGroupInput = ({ value, setValue, handleSubmit, setLessonTime }) => {
       >
         <div className="flex gap-4">
           <Input placeholder={t("Group name")} name="groupName" />
+          <Input
+            placeholder={t("Course price")}
+            name="coursePrice"
+            type="number"
+          />
           <TimePicker
             format="HH:mm"
             placeholder={t("Lesson time")}
             name="lessonTime"
             onChange={(date) => setLessonTime(date)}
-            style={{ width: 200, borderRadius: 0 }}
+            style={{ width: 300, borderRadius: 0 }}
           />
         </div>
         <h5 className="pt-3 pb-1">{t("Select week days")}:</h5>
