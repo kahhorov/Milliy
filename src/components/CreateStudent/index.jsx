@@ -51,6 +51,7 @@ function CreateStudent({ studentModal, setStudentModal }) {
     const studentName = formData.get("studentName").toLowerCase();
     const lastName = formData.get("lastName").toLowerCase();
     const phoneNumber = formData.get("phoneNumber");
+    const telegramId = formData.get("telegramId");
     getData.days = value;
 
     if (!studentName.trim()) {
@@ -65,6 +66,11 @@ function CreateStudent({ studentModal, setStudentModal }) {
     }
     if (!phoneNumber.trim()) {
       setText(t("Enter the student's phone number!"));
+      setNotfication(true);
+      return;
+    }
+    if (!telegramId.trim()) {
+      setText(t("Telegram must not be empty!"));
       setNotfication(true);
       return;
     }

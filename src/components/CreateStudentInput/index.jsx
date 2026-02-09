@@ -46,11 +46,19 @@ function CreateStudentInput({
     <>
       <form
         id="add-student"
-        className="grid grid-cols-1 sm:grid-cols-2 gap-4"
+        className="grid grid-cols-1 sm:grid-cols-3 gap-3"
         onSubmit={handleSubmit}
       >
-        <Input placeholder={t("Student name")} name="studentName" />
-        <Input placeholder={t("Student lastName")} name="lastName" />
+        <Input
+          placeholder={t("Student name")}
+          name="studentName"
+          autoComplete="off"
+        />
+        <Input
+          placeholder={t("Student lastName")}
+          name="lastName"
+          autoComplete="off"
+        />
         <InputGroup
           style={{
             width: "100%",
@@ -73,6 +81,11 @@ function CreateStudentInput({
             autoComplete="off"
           />
         </InputGroup>
+        <Input
+          type="number"
+          placeholder={t("Telegram username")}
+          name="telegramId"
+        />
         <InputPicker
           data={data}
           placeholder={t("Select group")}
@@ -81,7 +94,7 @@ function CreateStudentInput({
             setSelectedGroupId(value);
           }}
           defaultValue={selectedGroupId}
-          className={`text-gray-300 h-9 `}
+          className={`text-gray-300 h-9`}
         />
       </form>
       <CheckTree
