@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import {
   collection,
   addDoc,
@@ -7,8 +7,9 @@ import {
   query,
   orderBy,
   getDocs,
+  where,
 } from "firebase/firestore";
-import { db } from "../../firebase/firebase"; // Firebase yo'lini o'zingizga moslang
+import { db } from "../../firebase/firebase";
 import { ToastContainer, toast } from "react-toastify";
 import "react-toastify/dist/ReactToastify.css";
 import {
@@ -24,8 +25,10 @@ import {
   FiBell,
   FiSend,
   FiMessageSquare,
+  FiUserCheck,
 } from "react-icons/fi";
 import { FaTelegramPlane } from "react-icons/fa";
+import { useSelector } from "react-redux";
 
 // --- UI COMPONENTS ---
 const StatCard = ({ icon, label, value, color, isMoney, animate }) => {
@@ -83,16 +86,21 @@ const AddPayments = () => {
   // Manual Message Modal State
   const [showMsgModal, setShowMsgModal] = useState(false);
   const [msgGroupId, setMsgGroupId] = useState("");
-  const [msgStudentsList, setMsgStudentsList] = useState([]); // Modal ichidagi studentlar
+  const [msgStudentsList, setMsgStudentsList] = useState([]);
   const [msgStudentId, setMsgStudentId] = useState("");
   const [msgText, setMsgText] = useState("");
   const [sendingMsg, setSendingMsg] = useState(false);
 
   // Notification Log State
   const [notificationLog, setNotificationLog] = useState([]);
+  const theme = useSelector((state) => state.theme.value);
+
+  // Global tracking state for notifications
+  const [notifiedStudents, setNotifiedStudents] = useState(new Set());
+  const [lastNotificationCheck, setLastNotificationCheck] = useState(null);
 
   const today = new Date().toLocaleDateString("uz-UZ");
-  const todayStr = new Date().toLocaleDateString("en-CA"); // YYYY-MM-DD
+  const todayStr = new Date().toLocaleDateString("en-CA");
 
   // --- FIREBASE DATA FETCHING ---
   useEffect(() => {
@@ -381,6 +389,8 @@ const AddPayments = () => {
             : currentStatusInfo.lessonsLeft <= 3
               ? "reminder"
               : "none",
+      isLastDay: currentStatusInfo.lessonsLeft === 0,
+      isPaidForCurrentCycle: remainingMoney >= coursePrice,
     };
   };
 
@@ -393,6 +403,15 @@ const AddPayments = () => {
     });
   }, [students, payments, selectedGroupId, groups]);
 
+  // All students across all groups for global notification
+  const allStudents = useMemo(() => {
+    return groups.flatMap((group) => {
+      // Note: This would need actual fetching of all students
+      // For now, we'll work with selected group students
+      return [];
+    });
+  }, [groups]);
+
   // Statistics
   const activeStudents = calculatedStudents.filter((s) =>
     ["active", "paid", "warning"].includes(s.info.status),
@@ -404,114 +423,238 @@ const AddPayments = () => {
     .filter((p) => p.groupId === selectedGroupId)
     .reduce((acc, curr) => acc + Number(curr.amount), 0);
 
-  // --- 1. AUTOMATIC NOTIFICATION SENDER (EFFECT) ---
+  // --- 1. GLOBAL AUTOMATIC NOTIFICATION SENDER (EFFECT) ---
   useEffect(() => {
-    const sendAutoNotifications = async () => {
-      if (!selectedGroupId || calculatedStudents.length === 0) return;
-
-      const notificationsToSend = [];
-      const logEntries = [];
-
-      calculatedStudents.forEach((student) => {
-        const info = student.info;
-
-        // Agar puli to'langan bo'lsa yoki notification kerak bo'lmasa -> return
-        if (info.currentCycle.isPaid || !info.needNotification) return;
-
-        // Bugun yuborilganmi?
-        const storageKey = `notif_${student.id}_${todayStr}`;
-        if (localStorage.getItem(storageKey)) return;
-
-        // Telegram ID bormi?
-        if (!student.telegramId) return;
-
-        const lessonsLeft = info.currentCycle.lessonsLeft;
-        const hasDebt = info.debts.length > 0;
-        const totalDebt = info.debts.reduce((sum, d) => sum + d.debtAmount, 0);
-
-        let message = "";
-        let notificationType = "";
-
-        if (hasDebt) {
-          message = `Hurmatli o'quvchi, sizda to'lanmagan qarzdorlik mavjud (${formatMoney(
-            totalDebt,
-          )}). Iltimos, to'lovni amalga oshiring.`;
-          notificationType = "debt";
-        } else if (lessonsLeft === 0) {
-          message = `Bugun to'lov muddatingiz tugadi. Darsni davom ettirish uchun to'lov qiling.`;
-          notificationType = "deadline";
-        } else {
-          message = `Eslatma: Sizning to'lov muddatingiz tugashiga ${lessonsLeft} ta dars qoldi.`;
-          notificationType = "reminder";
-        }
-
-        notificationsToSend.push({
-          telegramId: student.telegramId,
-          studentName:
-            student.studentName || `${student.firstName} ${student.lastName}`,
-          message: message,
-          groupId: selectedGroupId,
-          studentId: student.id,
-          notificationType: notificationType,
-        });
-
-        logEntries.push({
-          student: student.studentName || student.firstName,
-          type: notificationType,
-          status: "success",
-        });
-      });
-
-      if (notificationsToSend.length === 0) return;
+    // Har safar component yuklanganda faqat bir marta tekshirish
+    const checkAndSendGlobalNotifications = async () => {
+      // Bugun allaqachon tekshirilganmi?
+      const todayKey = `notification_check_${todayStr}`;
+      if (localStorage.getItem(todayKey)) return;
 
       try {
-        // Backendga jo'natish
+        // Barcha guruhlarni olish
+        const groupsSnapshot = await getDocs(collection(db, "groups"));
+        const allGroups = groupsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+
+        let totalNotifications = 0;
+        const notificationsToSend = [];
+        const logEntries = [];
+
+        // Har bir guruh uchun o'quvchilarni olish
+        for (const group of allGroups) {
+          const studentsSnapshot = await getDocs(
+            collection(db, "groups", group.id, "students"),
+          );
+          const groupStudents = studentsSnapshot.docs.map((doc) => ({
+            id: doc.id,
+            ...doc.data(),
+          }));
+
+          // Har bir o'quvchi uchun hisoblash
+          for (const student of groupStudents) {
+            // To'lovlarini olish
+            const paymentsQuery = query(
+              collection(db, "payments"),
+              where("studentId", "==", student.id),
+            );
+            const paymentsSnapshot = await getDocs(paymentsQuery);
+            const studentPayments = paymentsSnapshot.docs.map((doc) => ({
+              id: doc.id,
+              ...doc.data(),
+            }));
+
+            // Statusni hisoblash
+            const info = calculateStudentStatus(
+              student,
+              group,
+              studentPayments,
+            );
+
+            // Agar to'lagan bo'lsa yoki telegram ID bo'lmasa, o'tkazib yubor
+            if (info.isPaidForCurrentCycle || !student.telegramId) continue;
+
+            // Bugun yuborilganmi?
+            const storageKey = `global_notif_${student.id}_${todayStr}`;
+            if (localStorage.getItem(storageKey)) continue;
+
+            const lessonsLeft = info.currentCycle.lessonsLeft;
+            const hasDebt = info.debts.length > 0;
+            const totalDebt = info.debts.reduce(
+              (sum, d) => sum + (d.debtAmount || 0),
+              0,
+            );
+
+            let message = "";
+            let notificationType = "";
+
+            const studentName = student.studentName || student.firstName || "";
+            const studentLastName = student.lastName || "";
+
+            // 0 dars qolgan holat (oxirgi kun)
+            if (lessonsLeft === 0 && !hasDebt) {
+              message = `Assalomu alaykum ${studentName} ${studentLastName}! Sizning to'lov muddatingiz bugun tugaydi. Iltimos, bugun to'lovni amalga oshiring. Aks holda, darslar to'xtatilishi mumkin.`;
+              notificationType = "last_day_warning";
+            }
+            // Qarzdorlik bor holat
+            else if (hasDebt) {
+              message = `Assalomu alaykum ${studentName} ${studentLastName}! Sizda to'lanmagan qarzdorlik mavjud (${formatMoney(
+                totalDebt,
+              )}). Iltimos, to'lovni amalga oshiring.`;
+              notificationType = "debt";
+            }
+            // 1-3 dars qolgan holat
+            else if (lessonsLeft <= 3 && lessonsLeft > 0) {
+              message = `Assalomu alaykum ${studentName} ${studentLastName}! Sizning to'lov muddatingiz tugashiga ${lessonsLeft} ta dars qoldi. To'lovni o'z vaqtida amalga oshirishingizni eslatamiz.`;
+              notificationType = "reminder";
+            } else {
+              continue; // Boshqa holatlarda xabar yuborma
+            }
+
+            notificationsToSend.push({
+              telegramId: student.telegramId,
+              studentName: `${studentName} ${studentLastName}`.trim(),
+              message: message,
+              groupId: group.id,
+              groupName: group.groupName,
+              studentId: student.id,
+              notificationType: notificationType,
+            });
+
+            logEntries.push({
+              student: `${studentName} ${studentLastName}`.trim(),
+              type: notificationType,
+              status: "success",
+            });
+
+            totalNotifications++;
+          }
+        }
+
+        // Xabarlarni yuborish
+        if (notificationsToSend.length > 0) {
+          try {
+            const response = await fetch(
+              "http://localhost:8000/send-notifications",
+              {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  notifications: notificationsToSend,
+                  date: todayStr,
+                }),
+              },
+            );
+
+            if (response.ok) {
+              // LocalStorage'ga yozish
+              notificationsToSend.forEach((n) => {
+                localStorage.setItem(
+                  `global_notif_${n.studentId}_${todayStr}`,
+                  "true",
+                );
+              });
+
+              // Umumiy tekshiruvni belgilash
+              localStorage.setItem(todayKey, "true");
+
+              // Log'ni yangilash
+              setNotificationLog((prev) => [
+                {
+                  date: new Date().toLocaleString("uz-UZ"),
+                  count: totalNotifications,
+                  details: logEntries,
+                  type: "auto_global",
+                },
+                ...prev.slice(0, 9),
+              ]);
+
+              toast.info(
+                `Avtomatik tizim: ${totalNotifications} ta o'quvchiga eslatma yuborildi.`,
+              );
+            }
+          } catch (error) {
+            console.error("Notification sending error:", error);
+          }
+        }
+      } catch (error) {
+        console.error("Global notification check error:", error);
+      }
+    };
+
+    // Component yuklanganda 3 soniyadan keyin ishga tushirish
+    const timer = setTimeout(() => {
+      checkAndSendGlobalNotifications();
+    }, 3000);
+
+    return () => clearTimeout(timer);
+  }, []);
+
+  // --- 2. PAYMENT SUCCESS NOTIFICATION ---
+  const sendPaymentSuccessNotification = useCallback(
+    async (student, paymentData) => {
+      if (!student.telegramId) return;
+
+      const studentName = student.studentName || student.firstName || "";
+      const studentLastName = student.lastName || "";
+      const formattedDate = new Date(paymentData.date).toLocaleDateString(
+        "uz-UZ",
+      );
+
+      const message = `Assalomu alaykum ${studentName} ${studentLastName}! Siz ${formatMoney(
+        paymentData.amount,
+      )} miqdorida to'lov amalga oshirdingiz. To'lov sanasi: ${formattedDate}. Rahmat!`;
+
+      try {
         const response = await fetch(
           "http://localhost:8000/send-notifications",
           {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              notifications: notificationsToSend,
+              notifications: [
+                {
+                  telegramId: student.telegramId,
+                  studentName: `${studentName} ${studentLastName}`.trim(),
+                  message: message,
+                  groupId: selectedGroupId,
+                  studentId: student.id,
+                  notificationType: "payment_success",
+                },
+              ],
               date: todayStr,
             }),
           },
         );
 
         if (response.ok) {
-          // LocalStoragega yozish
-          notificationsToSend.forEach((n) => {
-            localStorage.setItem(`notif_${n.studentId}_${todayStr}`, "true");
-          });
-
-          // Loglarni yangilash (FAQAT YUBORILGANLAR)
+          // Log'ga qo'shish
           setNotificationLog((prev) => [
             {
               date: new Date().toLocaleTimeString(),
-              count: notificationsToSend.length,
-              details: logEntries,
+              count: 1,
+              details: [
+                {
+                  student: `${studentName} ${studentLastName}`.trim(),
+                  type: "payment_confirmation",
+                  status: "success",
+                },
+              ],
+              type: "payment",
             },
-            ...prev.slice(0, 9), // Max 10 ta log
+            ...prev.slice(0, 9),
           ]);
-
-          toast.info(
-            `Avtomatik tizim: ${notificationsToSend.length} ta o'quvchiga eslatma yuborildi.`,
-          );
         }
       } catch (error) {
-        console.error("Auto notification error:", error);
+        console.error("Payment notification error:", error);
       }
-    };
+    },
+    [selectedGroupId, todayStr],
+  );
 
-    // 2 soniya kutib keyin yuboradi (UI yuklanishi uchun)
-    const timer = setTimeout(() => {
-      sendAutoNotifications();
-    }, 2000);
-
-    return () => clearTimeout(timer);
-  }, [calculatedStudents, selectedGroupId, todayStr]);
-
-  // --- 2. MANUAL MESSAGE HANDLER ---
+  // --- 3. MANUAL MESSAGE HANDLER ---
   const handleSendManualMessage = async () => {
     if (!msgGroupId || !msgStudentId || !msgText.trim()) {
       return toast.warning("Barcha maydonlarni to'ldiring!");
@@ -524,11 +667,13 @@ const AddPayments = () => {
 
     setSendingMsg(true);
 
+    const studentName =
+      targetStudent.studentName || targetStudent.firstName || "";
+    const studentLastName = targetStudent.lastName || "";
+
     const manualPayload = {
       telegramId: targetStudent.telegramId,
-      studentName:
-        targetStudent.studentName ||
-        `${targetStudent.firstName} ${targetStudent.lastName}`,
+      studentName: `${studentName} ${studentLastName}`.trim(),
       message: msgText,
       groupId: msgGroupId,
       studentId: msgStudentId,
@@ -557,6 +702,7 @@ const AddPayments = () => {
                 status: "success",
               },
             ],
+            type: "manual",
           },
           ...prev.slice(0, 9),
         ]);
@@ -617,7 +763,7 @@ const AddPayments = () => {
         note = "Joriy to'lov";
       }
 
-      await addDoc(collection(db, "payments"), {
+      const paymentData = {
         studentId: selectedStudent.id,
         studentName: (
           selectedStudent.studentName ||
@@ -631,9 +777,15 @@ const AddPayments = () => {
         createdAt: serverTimestamp(),
         type: paymentType,
         note: note,
-      });
+      };
 
-      toast.success("To'lov qabul qilindi!");
+      // To'lovni saqlash
+      await addDoc(collection(db, "payments"), paymentData);
+
+      // To'lov haqida xabar yuborish
+      await sendPaymentSuccessNotification(selectedStudent, paymentData);
+
+      toast.success("To'lov qabul qilindi va xabar yuborildi!");
       setShowModal(false);
       setAmount("");
     } catch (e) {
@@ -645,14 +797,16 @@ const AddPayments = () => {
 
   // --- UI RENDER ---
   return (
-    <div className="min-h-screen bg-[#F8FAFC] p-4 md:p-8 font-sans text-slate-900">
+    <div
+      className={`min-h-screen  p-4 md:p-8 font-sans ${theme === "light" ? "bg-[#F8FAFC] text-slate-900" : "bg-[#0F131A] text-slate-100"}`}
+    >
       <ToastContainer position="top-right" autoClose={3000} />
 
       {/* HEADER */}
       <div className="mb-10">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
           <div>
-            <h1 className="text-3xl font-black tracking-tight text-slate-800">
+            <h1 className="text-3xl font-black tracking-tight">
               To'lovlar Monitoringi
             </h1>
             <p className="text-slate-500 flex items-center gap-2 mt-1 font-medium">
@@ -664,9 +818,9 @@ const AddPayments = () => {
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowMsgModal(true)}
-              className="flex items-center gap-3 px-6 py-4 rounded-2xl font-bold shadow-lg transition-all active:scale-95 bg-white text-blue-600 hover:bg-blue-50 border border-blue-100"
+              className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-bold shadow-lg transition-all ${theme === "light" ? "active:scale-95 bg-white text-blue-600 hover:bg-blue-50 border border-blue-100" : "active:scale-95 bg-[#1e2839d4] text-blue-300 hover:bg-slate-800 border border-slate-400/30 cursor-pointer"}`}
             >
-              <FiMessageSquare className="text-xl" />
+              <FiMessageSquare className={`text-xl`} />
               <span>Xabar yuborish</span>
             </button>
           </div>
@@ -681,7 +835,7 @@ const AddPayments = () => {
             color="blue"
           />
           <StatCard
-            icon={<FiCheckCircle />}
+            icon={<FiUserCheck />}
             label="Aktiv / To'lagan"
             value={activeStudents}
             color="green"
@@ -702,24 +856,40 @@ const AddPayments = () => {
           />
         </div>
 
-        {/* NOTIFICATION LOG (CLEAN VERSION) */}
+        {/* NOTIFICATION LOG */}
         {notificationLog.length > 0 && (
-          <div className="mt-6 bg-white rounded-2xl p-4 border border-slate-200">
-            <h3 className="font-bold text-slate-700 mb-2 flex items-center gap-2">
+          <div
+            className={`mt-6 rounded-2xl p-4 ${theme === "light" ? "bg-white border border-slate-200" : "bg-table-bg border border-slate-500/50"}`}
+          >
+            <h3
+              className={`font-bold  mb-2 flex items-center gap-2 ${theme === "light" ? "text-slate-800" : "text-slate-100"}`}
+            >
               <FiBell /> So'nggi Xabarlar Tarixi
             </h3>
             <div className="space-y-2 max-h-40 overflow-y-auto custom-scrollbar">
               {notificationLog.map((log, idx) => (
                 <div
                   key={idx}
-                  className="text-sm border-l-4 border-blue-500 pl-3 py-2 bg-slate-50 rounded"
+                  className={`text-sm border-l-4 px-3 py-2 rounded-md ${theme === "light" ? "bg-slate-50" : "bg-slate-800 "} ${
+                    log.type === "payment"
+                      ? "border-emerald-500"
+                      : log.type === "manual"
+                        ? "border-blue-500"
+                        : "border-orange-500"
+                  }`}
                 >
-                  <div className="flex justify-between">
-                    <span className="font-medium text-slate-500">
-                      {log.date}
-                    </span>
-                    <span className="font-bold text-blue-600">
-                      {log.count} ta xabar yuborildi
+                  <div className="flex justify-between items-center">
+                    <span className="font-medium">{log.date}</span>
+                    <span
+                      className={`font-bold ${
+                        log.type === "payment"
+                          ? "text-emerald-600"
+                          : log.type === "manual"
+                            ? "text-blue-600"
+                            : "text-orange-600"
+                      }`}
+                    >
+                      {log.count} ta xabar
                     </span>
                   </div>
                   <div className="mt-1">
@@ -728,16 +898,20 @@ const AddPayments = () => {
                         key={i}
                         className={`text-[11px] ${
                           detail.status === "success"
-                            ? "text-slate-600"
+                            ? `${theme === "light" ? "text-slate-600" : "text-slate-200"}`
                             : "text-red-500"
                         }`}
                       >
                         - {detail.student}:{" "}
                         {detail.type === "manual"
                           ? "Shaxsiy xabar"
-                          : detail.type === "debt"
-                            ? "Qarzdorlik eslatmasi"
-                            : "Muddat eslatmasi"}
+                          : detail.type === "payment_confirmation"
+                            ? "To'lov tasdiqlandi"
+                            : detail.type === "debt"
+                              ? "Qarzdorlik eslatmasi"
+                              : detail.type === "last_day_warning"
+                                ? "Oxirgi kun ogohlantirishi"
+                                : "Muddat eslatmasi"}
                       </p>
                     ))}
                   </div>
@@ -749,13 +923,17 @@ const AddPayments = () => {
       </div>
 
       {/* FILTERS */}
-      <div className="bg-white rounded-3xl p-4 mb-8 flex flex-col md:flex-row gap-4 shadow-sm border border-slate-200">
+      <div
+        className={`${theme === "light" ? "bg-white border border-slate-200" : "bg-table-bg border border-[#2A2C31]"} rounded-2xl p-4 mb-8 flex flex-col md:flex-row gap-4 shadow-sm`}
+      >
         <div className="relative flex-1">
-          <FiSearch className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+          <FiSearch
+            className={`absolute left-4 top-1/2 -translate-y-1/2 ${theme === "light" ? "text-slate-400" : "text-slate-200"}`}
+          />
           <input
             type="text"
             placeholder="O'quvchi ismini qidiring..."
-            className="w-full bg-slate-50 rounded-2xl py-4 pl-12 pr-4 outline-none font-medium"
+            className={`${theme === "light" ? "bg-slate-50" : "bg-slate-700/40"} w-full rounded-2xl py-4 pl-12 pr-4 outline-none font-medium`}
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
           />
@@ -763,11 +941,15 @@ const AddPayments = () => {
         <select
           value={selectedGroupId}
           onChange={(e) => setSelectedGroupId(e.target.value)}
-          className="w-full md:w-72 bg-slate-50 rounded-2xl py-4 px-5 outline-none font-bold text-slate-700 cursor-pointer"
+          className={`${theme === "light" ? "bg-slate-50 text-slate-700" : "bg-slate-700/40 text-slate-300"} w-full md:w-72 rounded-2xl py-4 px-5 outline-none font-bold cursor-pointer`}
         >
           <option value="">Guruhni tanlang...</option>
           {groups.map((g) => (
-            <option key={g.id} value={g.id}>
+            <option
+              key={g.id}
+              value={g.id}
+              className={`${theme === "light" ? "bg-slate-100" : "bg-slate-800 text-slate-300"}`}
+            >
               {g.groupName}
             </option>
           ))}
@@ -775,16 +957,23 @@ const AddPayments = () => {
       </div>
 
       {/* TABLE */}
-      <div className="bg-white rounded-[32px] shadow-xl border border-slate-200 overflow-hidden">
+      <div
+        className={`${theme === "light" ? "bg-white border border-slate-200" : "bg-slate-800/40 text-slate-300"} rounded-4xl shadow-xl overflow-hidden`}
+      >
         {!selectedGroupId ? (
           <div className="py-32 text-center text-slate-400">
             <FiUsers size={48} className="mx-auto mb-4 opacity-20" />
             <p>Iltimos, ishni boshlash uchun guruhni tanlang</p>
+            <p className="text-sm mt-2">
+              Avtomatik tizim allaqachon barcha guruhlarni tekshirib chiqdi
+            </p>
           </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-left border-collapse">
-              <thead className="bg-slate-50/50 border-b border-slate-100 text-[10px] uppercase text-slate-400 font-black tracking-widest">
+              <thead
+                className={`${theme === "light" ? "bg-slate-50 border-b border-slate-100 text-slate-400" : "bg-slate-800/40"} text-[10px] uppercase  font-black tracking-widest`}
+              >
                 <tr>
                   <th className="py-6 px-8">O'quvchi</th>
                   <th className="py-6 px-6 text-center">
@@ -809,15 +998,16 @@ const AddPayments = () => {
                     const isCritical = info.status === "critical";
                     const isWarning = info.status === "warning";
                     const isExpired = info.status === "expired";
+                    const isLastDay = info.isLastDay;
                     const needsNotification = info.needNotification;
                     const hasTelegramId = !!student.telegramId;
 
                     return (
                       <tr
                         key={student.id}
-                        className={`hover:bg-slate-50/50 transition-all duration-300 ${
+                        className={`${theme === "light" ? "hover:bg-slate-50/50" : "hover:bg-slate-500/50"} transition-all duration-300 ${
                           isUrgent ? "bg-red-50/30" : ""
-                        }`}
+                        } ${isLastDay ? "bg-orange-50/30" : ""}`}
                       >
                         {/* Name */}
                         <td className="py-5 px-8">
@@ -827,7 +1017,9 @@ const AddPayments = () => {
                               ${
                                 isUrgent
                                   ? "bg-red-100 text-red-600 animate-pulse"
-                                  : "bg-blue-100 text-blue-600"
+                                  : isLastDay
+                                    ? "bg-orange-100 text-orange-600"
+                                    : "bg-blue-100 text-blue-600"
                               }`}
                             >
                               {(
@@ -837,7 +1029,9 @@ const AddPayments = () => {
                               ).charAt(0)}
                             </div>
                             <div>
-                              <p className="font-bold text-slate-800 flex items-center gap-2">
+                              <p
+                                className={`${theme === "light" ? "text-slate-800" : "text-slate-200"} font-bold flex items-center gap-2`}
+                              >
                                 {student.studentName ||
                                   `${student.firstName} ${student.lastName}`}
                                 {hasTelegramId ? (
@@ -870,12 +1064,16 @@ const AddPayments = () => {
                                   ? "text-red-500"
                                   : isWarning
                                     ? "text-orange-500"
-                                    : "text-slate-700"
+                                    : isLastDay
+                                      ? "text-orange-600"
+                                      : "text-slate-700"
                             }`}
                           >
                             {isUrgent
                               ? "BUGUN MUDDAT TUGAYDI"
-                              : `${info.currentCycle.lessonsPassed} / 12 dars`}
+                              : isLastDay
+                                ? "OXIRGI KUN - TO'LOV KERAK"
+                                : `${info.currentCycle.lessonsPassed} / 12 dars`}
                           </div>
                           <div className="w-32 h-2 bg-slate-200 rounded-full mx-auto overflow-hidden relative">
                             <div
@@ -889,20 +1087,27 @@ const AddPayments = () => {
                                       ? "bg-red-500"
                                       : isWarning
                                         ? "bg-orange-400"
-                                        : "bg-blue-500"
+                                        : isLastDay
+                                          ? "bg-orange-500 w-full"
+                                          : "bg-blue-500"
                               }`}
                               style={{
-                                width: isUrgent
-                                  ? "100%"
-                                  : `${
-                                      (info.currentCycle.lessonsPassed / 12) *
-                                      100
-                                    }%`,
+                                width:
+                                  isUrgent || isLastDay
+                                    ? "100%"
+                                    : `${
+                                        (info.currentCycle.lessonsPassed / 12) *
+                                        100
+                                      }%`,
                               }}
                             ></div>
                           </div>
-                          <div className="text-xs text-slate-500 mt-1">
-                            {info.currentCycle.lessonsLeft} dars qoldi
+                          <div
+                            className={`${theme === "light" ? "text-slate-500" : "text-slate-200"} text-xs mt-1`}
+                          >
+                            {isLastDay
+                              ? "To'lov qilinmagan taqdirda guruhdan chetlatiladi"
+                              : `${info.currentCycle.lessonsLeft} dars qoldi`}
                           </div>
                         </td>
 
@@ -919,12 +1124,15 @@ const AddPayments = () => {
                                     ? "bg-orange-100 text-orange-600 border-orange-200"
                                     : isExpired
                                       ? "bg-rose-100 text-rose-700 border-rose-200"
-                                      : info.status === "paid"
-                                        ? "bg-emerald-100 text-emerald-600 border-emerald-200"
-                                        : "bg-slate-100 text-slate-500 border-slate-200"
+                                      : isLastDay
+                                        ? "bg-orange-600 text-white border-orange-600"
+                                        : info.status === "paid"
+                                          ? "bg-emerald-100 text-emerald-600 border-emerald-200"
+                                          : "bg-slate-100 text-slate-500 border-slate-200"
                             }`}
                           >
                             {isUrgent && <FiAlertCircle size={12} />}
+                            {isLastDay && <FiAlertTriangle size={12} />}
                             {info.badgeText}
                           </span>
                         </td>
@@ -968,9 +1176,21 @@ const AddPayments = () => {
                             <div className="flex flex-col items-center">
                               {hasTelegramId ? (
                                 <>
-                                  <div className="w-3 h-3 bg-red-500 rounded-full animate-pulse"></div>
-                                  <span className="text-[10px] text-red-500 font-bold mt-1">
-                                    AVTO YUBORILISHI KERAK
+                                  <div
+                                    className={`w-3 h-3 rounded-full animate-pulse ${
+                                      isLastDay ? "bg-orange-500" : "bg-red-500"
+                                    }`}
+                                  ></div>
+                                  <span
+                                    className={`text-[10px] font-bold mt-1 ${
+                                      isLastDay
+                                        ? "text-orange-500"
+                                        : "text-red-500"
+                                    }`}
+                                  >
+                                    {isLastDay
+                                      ? "OXIRGI KUN - XABAR YUBORILDI"
+                                      : "AVTO YUBORILDI"}
                                   </span>
                                 </>
                               ) : (
@@ -1002,9 +1222,11 @@ const AddPayments = () => {
                             ${
                               isUrgent || isCritical || isExpired
                                 ? "bg-red-600 border-red-600 text-white shadow-red-200 hover:bg-red-700 hover:shadow-lg animate-pulse"
-                                : isWarning
-                                  ? "bg-orange-50 border-orange-200 text-orange-600 hover:bg-orange-100"
-                                  : "bg-white border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200"
+                                : isLastDay
+                                  ? "bg-orange-600 border-orange-600 text-white shadow-orange-200 hover:bg-orange-700 hover:shadow-lg"
+                                  : isWarning
+                                    ? "bg-orange-50 border-orange-200 text-orange-600 hover:bg-orange-100"
+                                    : "bg-white border-slate-200 text-slate-600 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200"
                             }`}
                           >
                             <FiDollarSign size={20} />
@@ -1051,7 +1273,7 @@ const AddPayments = () => {
                     value={msgGroupId}
                     onChange={(e) => {
                       setMsgGroupId(e.target.value);
-                      setMsgStudentId(""); // Guruh o'zgarsa student reset
+                      setMsgStudentId("");
                     }}
                     className="w-full bg-slate-50 border-2 border-transparent focus:border-blue-500 focus:bg-white rounded-2xl py-4 px-4 font-bold text-slate-700 outline-none transition-all cursor-pointer max-h-40 overflow-y-auto"
                   >
@@ -1065,7 +1287,7 @@ const AddPayments = () => {
                 </div>
               </div>
 
-              {/* Student Select (Only shows if group is selected) */}
+              {/* Student Select */}
               {msgGroupId && (
                 <div className="animate-in fade-in slide-in-from-top-2 duration-300">
                   <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1">
@@ -1134,7 +1356,9 @@ const AddPayments = () => {
               className={`px-8 py-6 border-b flex justify-between items-center ${
                 selectedStudent.info.status === "urgent"
                   ? "bg-red-50 border-red-100"
-                  : "bg-slate-50 border-slate-100"
+                  : selectedStudent.info.isLastDay
+                    ? "bg-orange-50 border-orange-100"
+                    : "bg-slate-50 border-slate-100"
               }`}
             >
               <div>
@@ -1254,7 +1478,9 @@ const AddPayments = () => {
                 className={`w-full py-4 rounded-2xl font-bold text-lg shadow-xl text-white transition-all active:scale-95 disabled:opacity-70 ${
                   selectedStudent.info.status === "urgent"
                     ? "bg-red-600 hover:bg-red-700 shadow-red-200"
-                    : "bg-slate-900 hover:bg-slate-800 shadow-slate-200"
+                    : selectedStudent.info.isLastDay
+                      ? "bg-orange-600 hover:bg-orange-700 shadow-orange-200"
+                      : "bg-slate-900 hover:bg-slate-800 shadow-slate-200"
                 }`}
               >
                 {loading ? "Saqlanmoqda..." : "To'lovni Tasdiqlash"}
