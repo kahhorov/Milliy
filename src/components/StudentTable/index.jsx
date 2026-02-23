@@ -5,35 +5,7 @@ import {
   FiCheckCircle,
   FiUsers,
 } from "react-icons/fi";
-
-// Pulni nuqtalar bilan formatlash (masalan: 250 -> "250.000")
-const formatMoneyWithDots = (num) => {
-  if (num === null || num === undefined) return "0";
-
-  // Convert to number
-  const value = typeof num === "string" ? parseFloat(num) : num;
-  if (isNaN(value)) return "0";
-
-  // Agar son 1000 dan kichik bo'lsa, .000 qo'shamiz
-  // 250 -> 250.000
-  if (value < 1000) {
-    return `${value}.000`;
-  }
-
-  // Katta sonlar uchun thousand separators
-  // 2500 -> 2.500.000
-  // 25000 -> 25.000.000
-  const withCommas = value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
-  return `${withCommas}.000`;
-};
-
-// Qarzdorlik/Balansni formatlash
-const formatBalance = (amount) => {
-  if (!amount && amount !== 0) return "0 so'm";
-
-  const formatted = formatMoneyWithDots(amount);
-  return `${formatted} so'm`;
-};
+import { FaTelegramPlane } from "react-icons/fa";
 
 const StudentTable = ({
   theme,
@@ -41,7 +13,7 @@ const StudentTable = ({
   calculatedStudents,
   searchQuery,
   openPaymentModal,
-  formatMoney, // Bu prop endi ishlatilmaydi, lekin API ni buzmaslik uchun qoldirilgan
+  formatMoney,
 }) => {
   if (!selectedGroupId) {
     return (
@@ -100,13 +72,6 @@ const StudentTable = ({
                 const lessonsLeft = currentCycle.lessonsLeft ?? 0;
                 const totalLessons = currentCycle.totalLessons ?? 12;
                 const isPaid = !!currentCycle.isPaid;
-
-                // Qarzdorlik summasini hisoblash
-                const totalDebt =
-                  info.debts?.reduce((a, b) => a + (b.debtAmount || 0), 0) || 0;
-
-                // Balansni olish
-                const balance = info.balance || 0;
 
                 return (
                   <tr
@@ -230,37 +195,33 @@ const StudentTable = ({
 
                     {/* Money / Debt */}
                     <td className="py-5 px-8 text-center">
-                      {totalDebt > 0 ? (
+                      {info.debts?.length > 0 ? (
                         <div className="flex flex-col items-center">
                           <span className="text-red-400 font-bold text-sm">
-                            - {formatMoneyWithDots(totalDebt)} so'm
+                            -{" "}
+                            {formatMoney(
+                              info.debts.reduce(
+                                (a, b) => a + (b.debtAmount || 0),
+                                0,
+                              ),
+                            )}
                           </span>
                           <span className="text-[9px] text-red-400 font-bold uppercase">
                             Qarzdorlik
                           </span>
-                          {totalDebt >= 1000000 && (
-                            <span className="text-[8px] text-red-300 mt-0.5">
-                              ({(totalDebt / 1000000).toFixed(1)} million)
-                            </span>
-                          )}
                         </div>
-                      ) : balance > 0 ? (
+                      ) : info.balance > 0 ? (
                         <div className="flex flex-col items-center">
                           <span className="text-emerald-600 font-bold text-sm">
-                            + {formatMoneyWithDots(balance)} so'm
+                            + {formatMoney(info.balance)}
                           </span>
                           <span className="text-[9px] text-emerald-400 font-bold uppercase">
                             Balansda bor
                           </span>
-                          {balance >= 1000000 && (
-                            <span className="text-[8px] text-emerald-300 mt-0.5">
-                              ({(balance / 1000000).toFixed(1)} million)
-                            </span>
-                          )}
                         </div>
                       ) : (
                         <span className="text-slate-300 text-xs font-medium">
-                          0 so'm
+                          0 UZS
                         </span>
                       )}
                     </td>

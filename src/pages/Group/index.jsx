@@ -81,7 +81,7 @@ const ALL_WORKING_DAYS = Object.keys(DAYS_ORDER);
 
 function Group() {
   const { id } = useParams();
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   const theme = useSelector((state) => state.theme.value);
   const isDark = theme === "dark";
@@ -304,7 +304,7 @@ function Group() {
     setGroupSearchLoading(true);
     try {
       const groupsRef = collection(db, "groups");
-      let q = query(groupsRef, orderBy("groupName"), limit(50)); // Increased limit for better UX
+      let q = query(groupsRef, orderBy("groupName"), limit(50));
       if (search) {
         q = query(
           groupsRef,
@@ -466,11 +466,13 @@ function Group() {
     }
   };
 
+  // MUHIM: Guruh edit qilinganda barcha studentlarning kunlarini yangilash
   const handleGroupUpdate = async () => {
     setLoading(true);
     try {
       const finalDays = prepareDaysForSave(groupEditData.days);
 
+      // Guruh ma'lumotlarini yangilash
       await updateDoc(doc(db, "groups", id), {
         groupName: groupEditData.groupName,
         lessonTime: groupEditData.lessonTime,
@@ -478,9 +480,22 @@ function Group() {
         weekdays: finalDays,
       });
 
+      // Guruhdagi barcha studentlarning kunlarini yangilash
+      const studentsRef = collection(db, "groups", id, "students");
+      const studentsSnapshot = await getDocs(studentsRef);
+
+      if (!studentsSnapshot.empty) {
+        const batch = writeBatch(db);
+        studentsSnapshot.docs.forEach((studentDoc) => {
+          const studentRef = doc(db, "groups", id, "students", studentDoc.id);
+          batch.update(studentRef, { days: finalDays });
+        });
+        await batch.commit();
+      }
+
       toast.success(t("group_updated_successfully"));
       setShowGroupEditModal(false);
-      await loadGroupData();
+      await loadGroupData(); // Guruh ma'lumotlarini qayta yuklash
     } catch (error) {
       console.error("Group update error:", error);
       toast.error(t("error_updating_group"));
@@ -524,7 +539,7 @@ function Group() {
   if (initialLoading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <Loader size="lg" content={t("loading")} vertical />
+        <Loader size="lg" content={t("Loading")} vertical />
       </div>
     );
   }
@@ -616,7 +631,7 @@ function Group() {
                   isDark ? "text-gray-300" : "text-gray-600"
                 }`}
               >
-                {totalStudents} {t("students")}
+                {totalStudents} {t("Students")}
               </span>
             </div>
           </div>
@@ -706,9 +721,9 @@ function Group() {
                 }`}
                 style={{ width: "100%" }}
               >
-                <Column width={60} align="center" fixed>
+                <Column width={60} align="center">
                   <HeaderCell className="text-xs font-bold uppercase">
-                    {t("№")}
+                    {"№"}
                   </HeaderCell>
                   <Cell>
                     {(rowData, index) => (
@@ -722,9 +737,9 @@ function Group() {
                     )}
                   </Cell>
                 </Column>
-                <Column width={250} flexGrow={1}>
+                <Column width={250}>
                   <HeaderCell className="text-xs font-bold uppercase">
-                    {t("student_name")}
+                    {t("Student name")}
                   </HeaderCell>
                   <Cell>
                     {(rowData) => (
@@ -773,7 +788,7 @@ function Group() {
                 </Column>
                 <Column width={180}>
                   <HeaderCell className="text-xs font-bold uppercase">
-                    {t("telegram")}
+                    telegram
                   </HeaderCell>
                   <Cell>
                     {(rowData) => (
@@ -802,14 +817,14 @@ function Group() {
                     )}
                   </Cell>
                 </Column>
-                <Column width={220}>
+                <Column flexGrow={1}>
                   <HeaderCell className="text-xs font-bold uppercase">
-                    {t("weekdays")}
+                    {t("Weekdays")}
                   </HeaderCell>
                   <Cell>
                     {(rowData) => (
                       <TagGroup>
-                        {rowData.days.includes("Everyday") ? (
+                        {rowData.days.includes("Everyday" || "Every day") ? (
                           <Tag
                             color="green"
                             className="!rounded-full !px-3 !py-1 text-xs font-medium"
@@ -824,7 +839,9 @@ function Group() {
                                 color="cyan"
                                 className="!rounded-full !px-3 !py-1 !text-[10px] font-light"
                               >
-                                {t(day.slice(0, 3))}
+                                {i18n.language === "en"
+                                  ? t(day).slice(0, 3)
+                                  : t(day).slice(0, 2)}
                               </Tag>
                             ))}
                           </div>
@@ -833,7 +850,7 @@ function Group() {
                     )}
                   </Cell>
                 </Column>
-                <Column width={120} fixed="right">
+                <Column width={120}>
                   <HeaderCell className="text-xs font-bold uppercase">
                     {t("actions")}
                   </HeaderCell>
@@ -843,7 +860,7 @@ function Group() {
                         <Whisper
                           trigger="hover"
                           placement="top"
-                          speaker={<Tooltip>{t("edit")}</Tooltip>}
+                          speaker={<Tooltip>{t("Edit")}</Tooltip>}
                         >
                           <IconButton
                             size="sm"
@@ -861,7 +878,7 @@ function Group() {
                         <Whisper
                           trigger="hover"
                           placement="top"
-                          speaker={<Tooltip>{t("delete")}</Tooltip>}
+                          speaker={<Tooltip>{t("Delete")}</Tooltip>}
                         >
                           <IconButton
                             size="sm"
@@ -1031,7 +1048,7 @@ function Group() {
                 <Col xs={24}>
                   <Form.Group>
                     <Form.ControlLabel className="text-sm font-medium">
-                      {t("weekdays")}
+                      {t("Weekdays")}
                     </Form.ControlLabel>
                     <Form.Control
                       name="days"
@@ -1047,7 +1064,7 @@ function Group() {
             </Grid>
           </Form>
         </Modal.Body>
-        <Modal.Footer>
+        <Modal.Footer className="mt-3">
           <Button
             onClick={handleUpdate}
             appearance="primary"
@@ -1160,7 +1177,7 @@ function Group() {
                 <Col xs={24}>
                   <Form.Group>
                     <Form.ControlLabel className="text-sm font-medium">
-                      {t("weekdays")}
+                      {t("Weekdays")}
                     </Form.ControlLabel>
                     <Form.Control
                       name="days"
@@ -1168,7 +1185,7 @@ function Group() {
                       data={weekDaysOptions}
                       block
                       placeholder={t("select_weekdays")}
-                      className={isDark ? "dark-picker" : ""}
+                      className={`${isDark} ? "dark-picker" : ""`}
                     />
                   </Form.Group>
                 </Col>

@@ -7,6 +7,7 @@ import {
   orderBy,
   deleteDoc,
   doc,
+  getDocs,
 } from "firebase/firestore";
 import { db } from "../../firebase/firebase";
 import {
@@ -18,10 +19,12 @@ import {
   InputGroup,
   SelectPicker,
   Button,
-  Stack,
   IconButton,
   Modal,
   CheckPicker,
+  Whisper,
+  Tooltip as RsTooltip,
+  Badge as RsBadge,
 } from "rsuite";
 import ExcelJS from "exceljs";
 import { saveAs } from "file-saver";
@@ -31,7 +34,7 @@ import {
   XAxis,
   YAxis,
   CartesianGrid,
-  Tooltip,
+  Tooltip as RechartsTooltip,
   ResponsiveContainer,
   Cell,
   PieChart,
@@ -49,30 +52,49 @@ import {
   LuDownload,
   LuTrash2,
   LuPhone,
-  LuInbox,
+  LuInfo,
 } from "react-icons/lu";
 import { useTranslation } from "react-i18next";
 import { toast } from "react-toastify";
+import { GroupIcon } from "lucide-react";
 
 const AttendanceManagement = () => {
   const theme = useSelector((state) => state.theme.value);
   const isDark = theme === "dark";
   const { t } = useTranslation();
 
-  // --- STATE ---
   const [attendanceData, setAttendanceData] = useState([]);
+  const [groups, setGroups] = useState([]);
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState("");
-  const [timeFilter, setTimeFilter] = useState("3months");
+  const [timeFilter, setTimeFilter] = useState("Attendance");
 
+  // Export Modal States
   const [showExportModal, setShowExportModal] = useState(false);
   const [exportRange, setExportRange] = useState("all");
   const [selectedGroupNames, setSelectedGroupNames] = useState([]);
 
-  const [deleteModalOpen, setDeleteModalOpen] = useState(false);
-  const [itemToDelete, setItemToDelete] = useState(null);
+  // Groups ma'lumotlarini olish
+  useEffect(() => {
+    const fetchGroups = async () => {
+      try {
+        const groupsRef = collection(db, "groups");
+        const groupsSnapshot = await getDocs(groupsRef);
+        const groupsData = groupsSnapshot.docs.map((doc) => ({
+          id: doc.id,
+          ...doc.data(),
+        }));
+        setGroups(groupsData);
+      } catch (error) {
+        console.error("Error fetching groups:", error);
+        toast.error(t("Guruhlarni yuklashda xatolik"));
+      }
+    };
 
-  // 1. DATA FETCHING & AUTO-CLEANUP (90 DAYS)
+    fetchGroups();
+  }, [t]);
+
+  // 1. DATA FETCHING & AUTO-CLEANUP
   useEffect(() => {
     const q = query(collection(db, "attendance"), orderBy("createdAt", "desc"));
     const unsubscribe = onSnapshot(q, (snapshot) => {
@@ -91,18 +113,14 @@ const AttendanceManagement = () => {
             return null;
           }
 
-          const total = Number(item.totalStudents) || 0;
-          const present = Number(item.presentCount) || 0;
-          const late = Number(item.lateCount) || 0;
-          let abs = total - present - late;
-          if (abs < 0) abs = 0;
-
+          const abs =
+            (item.totalStudents || 0) -
+            (item.presentCount || 0) -
+            (item.lateCount || 0);
           return {
             ...item,
             jsDate: createdDate,
-            presentCount: present,
-            lateCount: late,
-            absentCount: abs,
+            absentCount: abs > 0 ? abs : 0,
           };
         })
         .filter(Boolean);
@@ -113,19 +131,17 @@ const AttendanceManagement = () => {
     return () => unsubscribe();
   }, []);
 
-  // 2. FILTERS LOGIC
+  // 2. FILTERS (List uchun)
   const filteredGroups = useMemo(() => {
     const now = new Date();
     return attendanceData.filter((group) => {
       const groupDate = group.jsDate;
       let matchesTime = true;
-
-      if (timeFilter === "daily") {
+      if (timeFilter === "daily")
         matchesTime = groupDate.toDateString() === now.toDateString();
-      } else if (timeFilter === "weekly") {
+      if (timeFilter === "weekly")
         matchesTime =
           groupDate >= new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
-      }
 
       const matchesSearch = group.groupName
         ?.toLowerCase()
@@ -153,37 +169,93 @@ const AttendanceManagement = () => {
     { name: t("Absent"), value: stats.absent, color: "#ef4444" },
   ];
 
+  // BAR CHART LOGIKASI
   const chartData = useMemo(() => {
     const latestGroupMap = new Map();
+
     attendanceData.forEach((group) => {
       if (
         searchTerm &&
         !group.groupName.toLowerCase().includes(searchTerm.toLowerCase())
-      )
+      ) {
         return;
+      }
+
       if (!latestGroupMap.has(group.groupName)) {
-        latestGroupMap.set(group.groupName, {
-          ...group,
-          presentCount: Number(group.presentCount),
-          lateCount: Number(group.lateCount),
-          absentCount: Number(group.absentCount),
-        });
+        latestGroupMap.set(group.groupName, group);
       }
     });
+
     return Array.from(latestGroupMap.values());
   }, [attendanceData, searchTerm]);
 
-  // 4. EXCEL EXPORT
+  // Guruhni groups collectionida mavjudligini tekshirish
+  const isGroupExists = (groupName) => {
+    return groups.some(
+      (group) =>
+        group.groupName?.toLowerCase() === groupName?.toLowerCase() ||
+        group.name?.toLowerCase() === groupName?.toLowerCase(),
+    );
+  };
+
+  // Export uchun guruhlar ro'yxatini tayyorlash (badge bilan)
+  const groupOptions = useMemo(() => {
+    const uniqueGroups = [...new Set(attendanceData.map((g) => g.groupName))];
+    return uniqueGroups.map((name) => {
+      const exists = isGroupExists(name);
+      return {
+        // Label sifatida to'g'ridan-to'g'ri JSX element
+        label: (
+          <div
+            className="flex items-center justify-between w-full gap-2"
+            style={{ padding: "2px 0" }}
+          >
+            <span>{name}</span>
+            {!exists && (
+              <Whisper
+                trigger="hover"
+                placement="right"
+                speaker={
+                  <RsTooltip>
+                    {t("This group is inactive or has been deleted.")}
+                  </RsTooltip>
+                }
+              >
+                <RsBadge
+                  content={t("Old")}
+                  style={{
+                    background: "#f59e0b",
+                    color: "#000",
+                    fontSize: "10px",
+                    fontWeight: "bold",
+                    marginLeft: "8px",
+                    padding: "2px 6px",
+                    borderRadius: "4px",
+                  }}
+                />
+              </Whisper>
+            )}
+          </div>
+        ),
+        value: name,
+        // Qo'shimcha ma'lumotlar
+        rawLabel: name,
+        exists: exists,
+      };
+    });
+  }, [attendanceData, groups, t]);
+
+  // 4. EXCEL EXPORT LOGIC
   const handleExport = async () => {
     const workbook = new ExcelJS.Workbook();
     const worksheet = workbook.addWorksheet("Davomat Hisoboti");
 
     worksheet.columns = [
-      { width: 10 },
-      { width: 40 },
-      { width: 20 },
-      { width: 20 },
-      { width: 25 },
+      { width: 8 }, // №
+      { width: 35 }, // F.I.SH
+      { width: 20 }, // Telefon
+      { width: 15 }, // Holati
+      { width: 20 }, // Izoh/Kechikish
     ];
 
     const now = new Date();
@@ -205,24 +277,30 @@ const AttendanceManagement = () => {
       );
     }
 
-    const grouped = dataToExport.reduce((acc, curr) => {
+    const groupedByGroupName = dataToExport.reduce((acc, curr) => {
       if (!acc[curr.groupName]) acc[curr.groupName] = [];
       acc[curr.groupName].push(curr);
       return acc;
     }, {});
 
-    Object.keys(grouped).forEach((groupName) => {
-      const gRow = worksheet.addRow([`GURUH: ${groupName.toUpperCase()}`]);
+    Object.keys(groupedByGroupName).forEach((groupName) => {
+      const isExists = isGroupExists(groupName);
+
+      const gRow = worksheet.addRow([
+        `GURUH: ${groupName.toUpperCase()}${!isExists ? " (ESKI GURUH)" : ""}`,
+      ]);
       worksheet.mergeCells(`A${gRow.number}:E${gRow.number}`);
       gRow.font = { bold: true, size: 14, color: { argb: "FFFFFFFF" } };
-      gRow.alignment = { horizontal: "center" };
+      gRow.alignment = { horizontal: "center", vertical: "middle" };
+      gRow.height = 35;
+
       gRow.getCell(1).fill = {
         type: "pattern",
         pattern: "solid",
-        fgColor: { argb: "FF1E293B" },
+        fgColor: { argb: !isExists ? "FFF59E0B" : "FF1E293B" },
       };
 
-      grouped[groupName]
+      groupedByGroupName[groupName]
         .sort((a, b) => b.jsDate - a.jsDate)
         .forEach((session) => {
           worksheet.addRow([]);
@@ -239,13 +317,13 @@ const AttendanceManagement = () => {
 
           const head = worksheet.addRow([
             "№",
-            "F.I.SH",
+            "O'QUVCHI F.I.SH",
             "TELEFON",
             "HOLATI",
             "IZOH",
           ]);
           head.eachCell((c) => {
-            c.font = { bold: true };
+            c.font = { bold: true, color: { argb: "FF475569" } };
             c.fill = {
               type: "pattern",
               pattern: "solid",
@@ -261,87 +339,97 @@ const AttendanceManagement = () => {
 
           session.attendance?.forEach((st, i) => {
             const status = st.status?.toLowerCase();
-            const isAbsent = status === "absent";
-            const isLate = status === "late";
+            let bg = "FFFFFFFF",
+              fg = "FF000000",
+              txt = "KELGAN";
+
+            if (status === "absent") {
+              bg = "FFFEE2E2";
+              fg = "FFB91C1C";
+              txt = "KELMAGAN";
+            } else if (status === "late") {
+              bg = "FFFEF3C7";
+              fg = "FFB45309";
+              txt = "KECHIKKAN";
+            } else {
+              bg = "FFDCFCE7";
+              fg = "FF15803D";
+              txt = "KELGAN";
+            }
 
             const r = worksheet.addRow([
               i + 1,
               `${st.studentName} ${st.lastName || ""}`,
               st.phoneNumber || "-",
-              isAbsent ? "KELMAGAN" : isLate ? "KECHIKKAN" : "KELGAN",
+              txt,
               st.delay || "-",
             ]);
-
             const sCell = r.getCell(4);
-            if (isAbsent)
-              sCell.font = { color: { argb: "FFFF0000" }, bold: true };
-            if (isLate)
-              sCell.font = { color: { argb: "FFF59E0B" }, bold: true };
-            if (status === "present")
-              sCell.font = { color: { argb: "FF10B981" }, bold: true };
+            sCell.fill = {
+              type: "pattern",
+              pattern: "solid",
+              fgColor: { argb: bg },
+            };
+            sCell.font = { bold: true, color: { argb: fg } };
+
+            r.eachCell((c) => {
+              c.border = {
+                top: { style: "thin", color: { argb: "FFCBD5E1" } },
+                left: { style: "thin", color: { argb: "FFCBD5E1" } },
+                bottom: { style: "thin", color: { argb: "FFCBD5E1" } },
+                right: { style: "thin", color: { argb: "FFCBD5E1" } },
+              };
+            });
           });
         });
+      worksheet.addRow([]);
       worksheet.addRow([]);
     });
 
     const buffer = await workbook.xlsx.writeBuffer();
-    saveAs(new Blob([buffer]), `Davomat_${Date.now()}.xlsx`);
+    saveAs(new Blob([buffer]), `Guruhlar_Davomati_${Date.now()}.xlsx`);
     setShowExportModal(false);
   };
 
-  // 5. DELETE ACTIONS
-  const confirmDelete = async () => {
-    if (!itemToDelete) return;
-    try {
-      await deleteDoc(doc(db, "attendance", itemToDelete));
-      toast.success(t("Deleted successfully"));
-    } catch (e) {
-      toast.error(t("Error deleting"));
-    } finally {
-      setDeleteModalOpen(false);
-      setItemToDelete(null);
+  const handleDelete = async (id) => {
+    if (window.confirm(t("Ushbu davomatni o'chirib tashlamoqchimisiz?"))) {
+      try {
+        await deleteDoc(doc(db, "attendance", id));
+        toast.success(t("Muvaffaqiyatli o'chirildi"));
+      } catch (e) {
+        toast.error(t("Xatolik yuz berdi"));
+      }
     }
   };
 
   const glassClass = isDark
-    ? "bg-[#1e293b]/60 border-white/10 backdrop-blur-xl shadow-2xl"
-    : "bg-white/80 border-slate-200 backdrop-blur-md shadow-sm";
-
-  const darkStyles = `
-    .rs-modal-content { background-color: ${isDark ? "#1e293b" : "#fff"} !important; color: ${isDark ? "#fff" : "#000"} !important; }
-    .rs-picker-select-menu, .rs-picker-check-menu { background-color: #1e293b !important; border: 1px solid #334155 !important; }
-    .rs-picker-select-menu-item, .rs-check-item { color: #e2e8f0 !important; }
-    .rs-picker-select-menu-item:hover, .rs-picker-select-menu-item-active { background-color: #3b82f6 !important; color: white !important; }
-    .rs-input, .rs-input-group { background-color: ${isDark ? "#0f172a" : "#fff"} !important; border-color: ${isDark ? "#334155" : "#e2e8f0"} !important; color: ${isDark ? "#fff" : "#000"} !important; }
-    .rs-table { background-color: transparent !important; }
-    .rs-table-cell { background-color: transparent !important; color: ${isDark ? "#cbd5e1" : "#475569"} !important; border-bottom: 1px solid ${isDark ? "#334155" : "#f1f5f9"} !important; }
-    .rs-panel-header { background: transparent !important; }
-  `;
+    ? "bg-white/[0.03] border-white/10 backdrop-blur-md"
+    : "bg-white/80 border-slate-200 backdrop-blur-md";
 
   if (loading)
     return (
       <div className="h-screen flex items-center justify-center">
-        <Loader size="lg" content={t("Loading...")} vertical />
+        <Loader size="lg" vertical />
       </div>
     );
 
   return (
     <div
-      className={`min-h-screen p-4 md:p-8 transition-colors duration-300 ${isDark ? "bg-[#0f172a] text-white" : "bg-slate-50 text-slate-800"}`}
+      className={`min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 transition-all duration-500 ${
+        isDark ? "bg-[#0f172a] text-white" : "bg-slate-50 text-slate-800"
+      }`}
     >
-      <style>{darkStyles}</style>
-
-      <div className="max-w-7xl mx-auto space-y-8">
-        {/* HEADER */}
-        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-6">
-          <h1 className="text-3xl font-black italic tracking-tighter uppercase">
+      <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6 lg:space-y-8">
+        {/* HEADER SECTION */}
+        <div className="flex flex-col lg:flex-row justify-between items-start lg:items-center gap-4 sm:gap-6">
+          <h1 className="text-2xl sm:text-xl font-black italic tracking-tighter uppercase">
             {t(timeFilter)}{" "}
             <span className="text-cyan-500 underline decoration-4">
-              {t("Attendance")}
+              {t("History")}
             </span>
           </h1>
 
-          <Stack spacing={10} wrap>
+          <div className="flex flex-col sm:flex-row w-full lg:w-auto gap-3 sm:gap-4">
             <SelectPicker
               data={[
                 { label: t("Daily"), value: "daily" },
@@ -351,13 +439,15 @@ const AttendanceManagement = () => {
               value={timeFilter}
               onChange={setTimeFilter}
               cleanable={false}
-              className="!w-40"
+              className="!w-full sm:!w-40"
+              size="md"
             />
-            <InputGroup inside className="!w-64">
+            <InputGroup inside className={`!w-full sm:!w-64 ${glassClass}`}>
               <Input
-                placeholder={t("Search group...")}
+                placeholder={t("Search group")}
                 value={searchTerm}
                 onChange={setSearchTerm}
+                size="md"
               />
               <InputGroup.Addon>
                 <LuSearch />
@@ -367,22 +457,27 @@ const AttendanceManagement = () => {
               color="green"
               appearance="primary"
               onClick={() => setShowExportModal(true)}
-              className="!rounded-xl"
+              size="md"
+              className="!w-full sm:!w-auto whitespace-nowrap"
             >
-              <LuDownload className="mr-2" /> EXCEL
+              <LuDownload className="mr-2" />
+              <span className="hidden xs:inline">{t("download excel")}</span>
+              <span className="xs:hidden">Excel</span>
             </Button>
-          </Stack>
+          </div>
         </div>
 
-        {/* ANALYTICS */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* ANALYTICS SECTION */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
+          {/* Bar Chart */}
           <div
-            className={`lg:col-span-2 p-6 rounded-[2.5rem] border ${glassClass}`}
+            className={`lg:col-span-2 p-4 sm:p-6 rounded-2xl sm:rounded-[2.5rem] border ${glassClass}`}
           >
-            <h5 className="text-xs font-black uppercase mb-6 flex items-center gap-2">
-              <LuTrendingUp className="text-cyan-500" /> {t("Dynamics")}
+            <h5 className="text-[10px] sm:text-xs font-black uppercase mb-4 sm:mb-6 flex items-center gap-2">
+              <LuTrendingUp className="text-cyan-500" />{" "}
+              {t("Attendance Dynamics")}
             </h5>
-            <div className="h-72">
+            <div className="h-60 sm:h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={chartData}>
                   <CartesianGrid
@@ -392,60 +487,72 @@ const AttendanceManagement = () => {
                   />
                   <XAxis
                     dataKey="groupName"
-                    tick={{ fontSize: 10, fill: "#888" }}
+                    tick={{ fontSize: 8, fill: "#888" }}
                     axisLine={false}
-                    tickLine={false}
+                    interval={window.innerWidth < 640 ? 1 : 0}
                   />
                   <YAxis
-                    tick={{ fontSize: 10, fill: "#888" }}
+                    tick={{ fontSize: 8, fill: "#888" }}
                     axisLine={false}
-                    tickLine={false}
                   />
-                  <Tooltip
+                  <RechartsTooltip
+                    cursor={{ fill: "transparent" }}
                     contentStyle={{
-                      borderRadius: "15px",
+                      borderRadius: "10px",
                       background: isDark ? "#1e293b" : "#fff",
                       border: "none",
+                      fontSize: "10px",
                     }}
                   />
-                  <Legend iconType="circle" />
+                  <Legend
+                    iconType="circle"
+                    wrapperStyle={{
+                      paddingTop: "15px",
+                      fontSize: "8px",
+                      fontWeight: "bold",
+                    }}
+                  />
                   <Bar
                     name={t("Present")}
                     dataKey="presentCount"
                     fill="#10b981"
                     radius={[4, 4, 0, 0]}
+                    barSize={window.innerWidth < 640 ? 20 : 40}
                   />
                   <Bar
                     name={t("Late")}
                     dataKey="lateCount"
                     fill="#f59e0b"
                     radius={[4, 4, 0, 0]}
+                    barSize={window.innerWidth < 640 ? 20 : 40}
                   />
                   <Bar
                     name={t("Absent")}
                     dataKey="absentCount"
                     fill="#ef4444"
                     radius={[4, 4, 0, 0]}
+                    barSize={window.innerWidth < 640 ? 20 : 40}
                   />
                 </BarChart>
               </ResponsiveContainer>
             </div>
           </div>
 
+          {/* Pie Chart */}
           <div
-            className={`p-6 rounded-[2.5rem] border relative flex flex-col items-center justify-center ${glassClass}`}
+            className={`p-4 sm:p-6 rounded-2xl sm:rounded-[2.5rem] border relative flex flex-col items-center justify-center ${glassClass}`}
           >
-            <h5 className="absolute top-8 left-8 text-xs font-black uppercase">
-              {t("Summary")}
+            <h5 className="absolute top-4 left-4 sm:top-8 sm:left-8 text-[10px] sm:text-xs font-black uppercase">
+              {t("General")}
             </h5>
-            <div className="h-64 w-full">
+            <div className="h-48 sm:h-64 w-full mt-8 sm:mt-0">
               <ResponsiveContainer>
                 <PieChart>
                   <Pie
                     data={pieData}
-                    innerRadius={60}
-                    outerRadius={80}
-                    paddingAngle={5}
+                    innerRadius={window.innerWidth < 640 ? 35 : 60}
+                    outerRadius={window.innerWidth < 640 ? 55 : 80}
+                    paddingAngle={10}
                     dataKey="value"
                     stroke="none"
                   >
@@ -453,14 +560,19 @@ const AttendanceManagement = () => {
                       <Cell key={`cell-${index}`} fill={entry.color} />
                     ))}
                   </Pie>
-                  <Tooltip />
+                  <RechartsTooltip
+                    contentStyle={{
+                      fontSize: "10px",
+                      borderRadius: "8px",
+                    }}
+                  />
                 </PieChart>
               </ResponsiveContainer>
-              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-4">
-                <p className="text-3xl font-black">
+              <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none mt-2 sm:mt-4">
+                <p className="text-xl sm:text-3xl font-black">
                   {stats.present + stats.late + stats.absent}
                 </p>
-                <p className="text-[10px] font-bold opacity-40 uppercase">
+                <p className="text-[8px] sm:text-[10px] font-bold opacity-40 uppercase">
                   {t("Total")}
                 </p>
               </div>
@@ -468,198 +580,216 @@ const AttendanceManagement = () => {
           </div>
         </div>
 
-        {/* LIST */}
-        <PanelGroup accordion className="space-y-4">
-          {filteredGroups.length > 0 ? (
-            filteredGroups.map((group) => (
-              <Panel
-                key={group.id}
-                eventKey={group.id}
-                header={
-                  <div className="flex flex-col md:flex-row justify-between items-center w-full pr-2 gap-4 text-left">
-                    <div className="flex items-center gap-4">
-                      <div className="p-3 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-2xl text-white shadow-lg">
-                        <LuUsers size={22} />
-                      </div>
-                      <div>
-                        <h4 className="text-base font-black">
+        {/* LIST SECTION (ACCORDION) */}
+        <PanelGroup accordion className="space-y-3 sm:space-y-4">
+          {filteredGroups.map((group) => (
+            <Panel
+              key={group.id}
+              eventKey={group.id}
+              header={
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center w-full pr-2 gap-3 sm:gap-4">
+                  <div className="flex items-start sm:items-center gap-3 w-full sm:w-auto">
+                    <div className="p-2 sm:p-3 bg-gradient-to-br from-cyan-400 to-blue-600 rounded-xl sm:rounded-2xl text-white shadow-lg flex-shrink-0">
+                      <LuUsers size={window.innerWidth < 640 ? 18 : 22} />
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-sm sm:text-base font-black tracking-tight break-words pr-2">
                           {group.groupName}
                         </h4>
-                        <div className="flex gap-3 text-[10px] font-bold opacity-60 uppercase">
-                          <span>
-                            <LuCalendarDays className="inline mr-1" />{" "}
-                            {group.date}
-                          </span>
-                          <span>
-                            <LuClock className="inline mr-1" />{" "}
-                            {group.lessonTime}
-                          </span>
-                        </div>
+                        {!isGroupExists(group.groupName) && (
+                          <Whisper
+                            trigger="hover"
+                            placement="top"
+                            speaker={
+                              <RsTooltip>
+                                {t("Bu guruh groups collectionida mavjud emas")}
+                              </RsTooltip>
+                            }
+                          >
+                            <RsBadge
+                              content={t("Old")}
+                              style={{
+                                background: "#f59e0b",
+                                color: "#000",
+                                fontSize: "8px",
+                                padding: "0 4px",
+                              }}
+                            />
+                          </Whisper>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 sm:gap-3 mt-1 text-[8px] sm:text-[10px] font-bold opacity-60 uppercase">
+                        <span className="flex items-center gap-1">
+                          <LuCalendarDays className="inline flex-shrink-0" />
+                          <span className="break-words">{group.date}</span>
+                        </span>
+                        <span className="flex items-center gap-1">
+                          <LuClock className="inline flex-shrink-0" />
+                          <span>{group.lessonTime}</span>
+                        </span>
                       </div>
                     </div>
-                    <div className="flex items-center gap-4">
-                      <Badge
-                        label={`P: ${group.presentCount}`}
+                  </div>
+                  <div className="flex items-center justify-between w-full sm:w-auto gap-3 sm:gap-4">
+                    <div className="flex gap-1 flex-wrap">
+                      <CustomBadge
+                        label={`${t("Present")}: ${group.presentCount}`}
                         color="bg-emerald-500"
+                        // isMobile={window.innerWidth < 640}
                       />
-                      <Badge
-                        label={`L: ${group.lateCount}`}
+                      <CustomBadge
+                        label={`${t("Late")}: ${group.lateCount}`}
                         color="bg-amber-500"
+                        // isMobile={window.innerWidth < 640}
                       />
-                      <Badge
-                        label={`A: ${group.absentCount}`}
+                      <CustomBadge
+                        label={`${t("Absent")}: ${group.absentCount}`}
                         color="bg-red-500"
-                      />
-                      <IconButton
-                        icon={<LuTrash2 className="text-red-500" />}
-                        appearance="subtle"
-                        circle
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setItemToDelete(group.id);
-                          setDeleteModalOpen(true);
-                        }}
+                        // isMobile={window.innerWidth < 640}
                       />
                     </div>
+                    <IconButton
+                      icon={<LuTrash2 className="text-red-500" size={16} />}
+                      appearance="subtle"
+                      circle
+                      size="sm"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleDelete(group.id);
+                      }}
+                    />
                   </div>
-                }
-                className={`${glassClass} !rounded-3xl border-none overflow-hidden mb-4`}
-              >
-                <Table data={group.attendance || []} autoHeight rowHeight={70}>
-                  <Table.Column flexGrow={1}>
-                    <Table.HeaderCell className="font-bold uppercase text-[10px]">
-                      {t("Student")}
-                    </Table.HeaderCell>
-                    <Table.Cell>
-                      {(rowData) => (
-                        <div className="flex flex-col">
-                          <span className="font-black text-cyan-500 text-sm uppercase">
-                            {rowData.studentName} {rowData.lastName}
-                          </span>
-                          <span className="text-[11px] opacity-70 flex items-center gap-1">
-                            <LuPhone size={12} /> {rowData.phoneNumber || "-"}
-                          </span>
-                        </div>
-                      )}
-                    </Table.Cell>
-                  </Table.Column>
-                  <Table.Column width={150} align="right">
-                    <Table.HeaderCell className="font-bold uppercase text-[10px]">
-                      {t("Status")}
-                    </Table.HeaderCell>
-                    <Table.Cell>
-                      {(rowData) => (
-                        <StatusBadge
-                          status={rowData.status}
-                          delay={rowData.delay}
-                        />
-                      )}
-                    </Table.Cell>
-                  </Table.Column>
-                </Table>
-              </Panel>
-            ))
-          ) : (
-            <div
-              className={`flex flex-col items-center justify-center p-20 rounded-[3rem] border-2 border-dashed ${isDark ? "border-white/10" : "border-slate-200"}`}
+                </div>
+              }
+              className={`${glassClass} !rounded-xl sm:!rounded-3xl border-none overflow-hidden hover:shadow-xl`}
             >
-              <LuInbox size={50} className="opacity-20 mb-4" />
-              <h3 className="text-xl font-black opacity-50">
-                {t("No data found")}
-              </h3>
-            </div>
-          )}
+              <Table
+                data={group.attendance || []}
+                autoHeight
+                rowHeight={70}
+                className="!bg-transparent"
+              >
+                <Table.Column width={200}>
+                  <Table.HeaderCell className="font-black text-[8px] sm:text-[10px] uppercase">
+                    {t("Student")}
+                  </Table.HeaderCell>
+                  <Table.Cell>
+                    {(rowData) => (
+                      <div className="flex flex-col capitalize">
+                        <span className="font-black text-cyan-500 text-xs sm:text-sm break-words pr-1">
+                          {rowData.studentName} {rowData.lastName}
+                        </span>
+                        <span className="text-[9px] sm:text-[11px] font-bold opacity-70 flex items-center gap-1 mt-1 lowercase break-all">
+                          <LuPhone
+                            size={10}
+                            className="text-blue-500 flex-shrink-0"
+                          />
+                          <span className="break-words">
+                            {rowData.phoneNumber || "N/A"}
+                          </span>
+                        </span>
+                      </div>
+                    )}
+                  </Table.Cell>
+                </Table.Column>
+                <Table.Column width={150} align="right">
+                  <Table.HeaderCell className="font-black text-[8px] sm:text-[10px] uppercase">
+                    {t("Status")}
+                  </Table.HeaderCell>
+                  <Table.Cell>
+                    {(rowData) => (
+                      <StatusBadgeComponent
+                        status={rowData.status}
+                        delay={rowData.delay}
+                      />
+                    )}
+                  </Table.Cell>
+                </Table.Column>
+              </Table>
+            </Panel>
+          ))}
         </PanelGroup>
 
-        {/* EXCEL MODAL - Yangilangan: Orqa fon bosilganda yopilmaydi */}
+        {/* MODAL - Export */}
         <Modal
           open={showExportModal}
           onClose={() => setShowExportModal(false)}
           size="xs"
-          backdrop="static" // Overlay bosilganda yopilmaydi
-          keyboard={false} // ESC bosilganda yopilmaydi
+          backdrop="static"
+          className={isDark ? "dark-theme-modal" : ""}
         >
           <Modal.Header>
-            <Modal.Title className="font-black uppercase">
-              <LuDownload className="text-green-500 inline mr-2" /> Excel Export
+            <Modal.Title
+              className={`font-black uppercase flex items-center gap-2 text-sm sm:text-base ${
+                isDark ? "text-white" : "text-slate-900"
+              }`}
+            >
+              <LuDownload className="text-green-500" /> {t("Excel Report")}
             </Modal.Title>
           </Modal.Header>
-          <Modal.Body className="space-y-4">
+          <Modal.Body className="space-y-4 sm:space-y-6 p-2 sm:p-4">
             <div>
-              <p className="text-[10px] font-black uppercase mb-1 text-gray-400">
-                Period:
+              <p
+                className={`text-[8px] sm:text-[10px] font-black uppercase mb-1 sm:mb-2 ${
+                  isDark ? "text-slate-400" : "text-slate-500"
+                }`}
+              >
+                {t("Export period")}
               </p>
               <SelectPicker
                 data={[
-                  { label: "All (90 days)", value: "all" },
-                  { label: "Today", value: "daily" },
-                  { label: "Weekly", value: "weekly" },
+                  { label: `${t("All saved (90 days)")}`, value: "all" },
+                  { label: `${t("Only today")}`, value: "daily" },
+                  { label: `${t("Last 7 days")}`, value: "weekly" },
                 ]}
                 value={exportRange}
                 onChange={setExportRange}
                 block
                 cleanable={false}
+                size="md"
               />
             </div>
             <div>
-              <p className="text-[10px] font-black uppercase mb-1 text-gray-400">
-                Specific Groups:
+              <p
+                className={`text-[8px] sm:text-[10px] font-black uppercase mb-1 sm:mb-2 flex items-center gap-1 ${
+                  isDark ? "text-slate-400" : "text-slate-500"
+                }`}
+              >
+                {t("Groups")}:
               </p>
               <CheckPicker
-                data={[...new Set(attendanceData.map((g) => g.groupName))].map(
-                  (n) => ({ label: n, value: n }),
-                )}
+                data={groupOptions}
                 value={selectedGroupNames}
                 onChange={setSelectedGroupNames}
                 block
-                placeholder="All Groups"
+                placeholder={t("All groups")}
+                size="md"
+                menuStyle={{ maxHeight: 300, overflow: "auto" }}
               />
+
+              <p className="text-[8px] sm:text-[10px] mt-1 sm:mt-2 italic text-blue-500">
+                * {t("Groups are output as aggregates in Excel")}.
+              </p>
             </div>
           </Modal.Body>
-          <Modal.Footer>
+          <Modal.Footer className="flex flex-col gap-2 p-2 sm:p-4">
             <Button
               onClick={handleExport}
               color="green"
               appearance="primary"
               block
-              className="!rounded-xl h-12 font-bold"
+              className="!rounded-xl sm:!rounded-2xl h-10 sm:h-12 font-black tracking-widest text-xs sm:text-sm"
             >
-              DOWNLOAD REPORT
+              {t("Upload report")}
             </Button>
-          </Modal.Footer>
-        </Modal>
-
-        {/* DELETE MODAL */}
-        <Modal
-          open={deleteModalOpen}
-          onClose={() => setDeleteModalOpen(false)}
-          size="xs"
-        >
-          <Modal.Body className="text-center p-6">
-            <LuTrash2 size={48} className="text-red-500 mx-auto mb-4" />
-            <h4 className="font-black mb-2 uppercase text-gray-400">
-              {t("Are you sure?")}
-            </h4>
-            <p className="text-sm text-gray-400">
-              {t("This action cannot be undone.")}
-            </p>
-          </Modal.Body>
-          <Modal.Footer className="flex gap-2">
             <Button
-              onClick={() => setDeleteModalOpen(false)}
+              onClick={() => setShowExportModal(false)}
               appearance="subtle"
               block
+              className={`text-xs sm:text-sm ${isDark ? "text-slate-300 hover:text-white" : ""}`}
             >
               {t("Cancel")}
-            </Button>
-            <Button
-              onClick={confirmDelete}
-              color="red"
-              appearance="primary"
-              block
-              className="font-bold"
-            >
-              {t("Delete")}
             </Button>
           </Modal.Footer>
         </Modal>
@@ -668,38 +798,51 @@ const AttendanceManagement = () => {
   );
 };
 
-const Badge = ({ label, color }) => (
+// SUB-COMPONENTS
+const CustomBadge = ({ label, color, isMobile }) => (
   <span
-    className={`${color}/10 ${color.replace("bg-", "text-")} px-2 py-1 rounded-lg text-[10px] font-black border border-current/10`}
+    className={`${color}/10 ${color.replace(
+      "bg-",
+      "text-",
+    )} px-1.5 sm:px-2 py-0.5 sm:py-1 rounded-lg text-[8px] sm:text-[10px] font-black border border-current/10 whitespace-nowrap`}
   >
-    {label}
+    {isMobile ? label.split(":")[0] : label}
   </span>
 );
 
-const StatusBadge = ({ status, delay }) => {
+const StatusBadgeComponent = ({ status, delay }) => {
+  const { t } = useTranslation();
   const config = {
     present: {
-      color: "text-emerald-500 bg-emerald-500/10",
-      icon: <LuCheck />,
-      label: "Present",
+      color: "text-emerald-500 bg-emerald-500/10 border-emerald-500/20",
+      icon: <LuCheck size={12} />,
+      label: "Kelgan",
     },
     late: {
-      color: "text-amber-500 bg-amber-500/10",
-      icon: <LuClock />,
-      label: delay || "Late",
+      color: "text-amber-500 bg-amber-500/10 border-amber-500/20",
+      icon: <LuClock size={12} />,
+      label: delay || "Kechikkan",
     },
     absent: {
-      color: "text-red-500 bg-red-500/10",
-      icon: <LuX />,
-      label: "Absent",
+      color: "text-red-500 bg-red-500/10 border-red-500/20",
+      icon: <LuX size={12} />,
+      label: "Kelmagan",
     },
   };
   const s = config[status?.toLowerCase()] || config.absent;
   return (
     <div
-      className={`inline-flex items-center gap-2 px-3 py-1 rounded-xl text-[10px] font-black uppercase border border-current/20 ${s.color}`}
+      className={`inline-flex items-center gap-1 sm:gap-2 px-1.5 sm:px-3 py-0.5 sm:py-1 rounded-lg sm:rounded-xl border text-[8px] sm:text-[10px] font-black uppercase ${s.color}`}
     >
-      {s.icon} {s.label}
+      {s.icon}
+      <span className="hidden xs:inline">{s.label}</span>
+      <span className="xs:hidden">
+        {s.label === "Kelgan"
+          ? t("Present")
+          : s.label === "Kechikkan"
+            ? t("Late")
+            : t("Absent")}
+      </span>
     </div>
   );
 };

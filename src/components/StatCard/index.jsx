@@ -38,7 +38,7 @@ const StatCard = ({ icon, label, value, color, isMoney, animate }) => {
 
     // MUHIM: Baza kichraytirilgan formatda (masalan 250 -> 250 ming) bo'lsa
     // 1000 ga ko'paytiramiz.
-    const calculatedValue = isMoney ? numValue * 1000000 : numValue;
+    const calculatedValue = isMoney ? numValue * 1000 : numValue;
 
     return {
       actualValue: calculatedValue,
