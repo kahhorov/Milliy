@@ -91,7 +91,6 @@ function CreateStudent({ studentModal, setStudentModal }) {
         ...getData,
         createdAt: serverTimestamp(),
       });
-
       toast.success(t("Student added successfully!"));
       setStudentModal(false);
       setNotfication(false);

@@ -5,7 +5,35 @@ import {
   FiCheckCircle,
   FiUsers,
 } from "react-icons/fi";
-import { FaTelegramPlane } from "react-icons/fa";
+
+// Pulni nuqtalar bilan formatlash (masalan: 250 -> "250.000")
+const formatMoneyWithDots = (num) => {
+  if (num === null || num === undefined) return "0";
+
+  // Convert to number
+  const value = typeof num === "string" ? parseFloat(num) : num;
+  if (isNaN(value)) return "0";
+
+  // Agar son 1000 dan kichik bo'lsa, .000 qo'shamiz
+  // 250 -> 250.000
+  if (value < 1000) {
+    return `${value}.000`;
+  }
+
+  // Katta sonlar uchun thousand separators
+  // 2500 -> 2.500.000
+  // 25000 -> 25.000.000
+  const withCommas = value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+  return `${withCommas}.000`;
+};
+
+// Qarzdorlik/Balansni formatlash
+const formatBalance = (amount) => {
+  if (!amount && amount !== 0) return "0 so'm";
+
+  const formatted = formatMoneyWithDots(amount);
+  return `${formatted} so'm`;
+};
 
 const StudentTable = ({
   theme,
@@ -13,16 +41,14 @@ const StudentTable = ({
   calculatedStudents,
   searchQuery,
   openPaymentModal,
-  formatMoney,
+  formatMoney, // Bu prop endi ishlatilmaydi, lekin API ni buzmaslik uchun qoldirilgan
 }) => {
   if (!selectedGroupId) {
     return (
       <div className="py-32 text-center text-slate-400">
         <FiUsers size={48} className="mx-auto mb-4 opacity-20" />
         <p>Iltimos, ishni boshlash uchun guruhni tanlang</p>
-        <p className="text-sm mt-2">
-          Avtomatik tizim allaqachon barcha guruhlarni tekshirib chiqdi
-        </p>
+        <p className="text-sm mt-2">Hali guruh tanlanmagan</p>
       </div>
     );
   }
@@ -38,7 +64,11 @@ const StudentTable = ({
           >
             <tr>
               <th className="py-6 px-8">O'quvchi</th>
-              <th className="py-6 px-6 text-center">Joriy Holat (12 dars)</th>
+              <th className="py-6 px-6 text-center">
+                Joriy Holat (
+                {calculatedStudents[0]?.info?.currentCycle?.totalLessons || 12}{" "}
+                dars)
+              </th>
               <th className="py-6 px-6 text-center">Status</th>
               <th className="py-6 px-8 text-center">Qarzdorlik / Balans</th>
               <th className="py-6 px-8 text-center">Eslatma</th>
@@ -68,14 +98,22 @@ const StudentTable = ({
                 // Darslar sonini xavfsiz o'zgaruvchiga olish
                 const lessonsPassed = currentCycle.lessonsPassed ?? 0;
                 const lessonsLeft = currentCycle.lessonsLeft ?? 0;
+                const totalLessons = currentCycle.totalLessons ?? 12;
                 const isPaid = !!currentCycle.isPaid;
+
+                // Qarzdorlik summasini hisoblash
+                const totalDebt =
+                  info.debts?.reduce((a, b) => a + (b.debtAmount || 0), 0) || 0;
+
+                // Balansni olish
+                const balance = info.balance || 0;
 
                 return (
                   <tr
                     key={student.id}
                     className={`${theme === "light" ? "hover:bg-slate-50/50" : "hover:bg-slate-600/20"} transition-all duration-300 ${
-                      isUrgent ? "bg-red-50/30" : ""
-                    } ${isLastDay ? "bg-orange-50/30" : ""}`}
+                      isUrgent ? "bg-red-500/30" : ""
+                    } ${isLastDay ? "bg-orange-500/30" : ""}`}
                   >
                     {/* Name */}
                     <td className="py-5 px-8">
@@ -129,7 +167,7 @@ const StudentTable = ({
                           ? "Tolov qlish zarur"
                           : isLastDay
                             ? "OXIRGI KUN - TO'LOV KERAK"
-                            : `${lessonsPassed} / 12 dars`}
+                            : `${lessonsPassed} / ${totalLessons} dars`}
                       </div>
                       <div className="w-32 h-2 bg-slate-200 rounded-full mx-auto overflow-hidden relative">
                         <div
@@ -151,7 +189,7 @@ const StudentTable = ({
                             width:
                               isUrgent || isLastDay
                                 ? "100%"
-                                : `${(lessonsPassed / 12) * 100}%`,
+                                : `${(lessonsPassed / totalLessons) * 100}%`,
                           }}
                         ></div>
                       </div>
@@ -192,34 +230,37 @@ const StudentTable = ({
 
                     {/* Money / Debt */}
                     <td className="py-5 px-8 text-center">
-                      {info.debts?.length > 0 ? (
+                      {totalDebt > 0 ? (
                         <div className="flex flex-col items-center">
                           <span className="text-red-400 font-bold text-sm">
-                            -{" "}
-                            {formatMoney(
-                              info.debts.reduce(
-                                (a, b) => a + (b.debtAmount || 0),
-                                0,
-                              ),
-                            )}
-                            .000
+                            - {formatMoneyWithDots(totalDebt)} so'm
                           </span>
                           <span className="text-[9px] text-red-400 font-bold uppercase">
                             Qarzdorlik
                           </span>
+                          {totalDebt >= 1000000 && (
+                            <span className="text-[8px] text-red-300 mt-0.5">
+                              ({(totalDebt / 1000000).toFixed(1)} million)
+                            </span>
+                          )}
                         </div>
-                      ) : info.balance > 0 ? (
+                      ) : balance > 0 ? (
                         <div className="flex flex-col items-center">
                           <span className="text-emerald-600 font-bold text-sm">
-                            + {formatMoney(info.balance)}
+                            + {formatMoneyWithDots(balance)} so'm
                           </span>
                           <span className="text-[9px] text-emerald-400 font-bold uppercase">
                             Balansda bor
                           </span>
+                          {balance >= 1000000 && (
+                            <span className="text-[8px] text-emerald-300 mt-0.5">
+                              ({(balance / 1000000).toFixed(1)} million)
+                            </span>
+                          )}
                         </div>
                       ) : (
                         <span className="text-slate-300 text-xs font-medium">
-                          0 UZS
+                          0 so'm
                         </span>
                       )}
                     </td>
@@ -264,7 +305,7 @@ const StudentTable = ({
                     </td>
 
                     {/* Action */}
-                    <td className="py-5 px-8 text-right">
+                    <td className="py-5 px-8 w-[170px] text-right">
                       <button
                         onClick={() => openPaymentModal(student)}
                         className={`px-3 py-1 cursor-pointer rounded-full border transition-all shadow-sm active:scale-95

@@ -8,13 +8,16 @@ export const usePaymentUtils = (
   groups,
   todayStr,
   setNotificationLog,
+  isHoliday,
+  formatDateToUzbek,
 ) => {
-  const formatMoney = (num) =>
-    new Intl.NumberFormat("uz-UZ", {
-      style: "currency",
-      currency: "UZS",
-      minimumFractionDigits: 0,
-    }).format(num);
+  const formatMoney = (num) => {
+    if (!num && num !== 0) return "0 so'm";
+
+    // Format with thousand separators
+    const numStr = num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+    return `${numStr} so'm`;
+  };
 
   const dayToNumber = {
     Sunday: 0,
@@ -49,6 +52,45 @@ export const usePaymentUtils = (
     return [];
   };
 
+  const getLessonsPerMonth = (targetDays, date) => {
+    const year = date.getFullYear();
+    const month = date.getMonth();
+    const firstDay = new Date(year, month, 1);
+    const lastDay = new Date(year, month + 1, 0);
+
+    let lessonCount = 0;
+    const currentDate = new Date(firstDay);
+
+    while (currentDate <= lastDay) {
+      if (
+        !isHoliday(currentDate) &&
+        targetDays.includes(currentDate.getDay())
+      ) {
+        lessonCount++;
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return lessonCount;
+  };
+
+  const getLessonsInPeriod = (targetDays, startDate, endDate) => {
+    let lessonCount = 0;
+    const currentDate = new Date(startDate);
+
+    while (currentDate <= endDate) {
+      if (
+        !isHoliday(currentDate) &&
+        targetDays.includes(currentDate.getDay())
+      ) {
+        lessonCount++;
+      }
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return lessonCount;
+  };
+
   const calculateStudentStatus = (student, group, allPayments) => {
     if (!group || !student?.createdAt) return { status: "unknown", info: {} };
 
@@ -74,59 +116,70 @@ export const usePaymentUtils = (
     if (targetDays.length === 0)
       return { status: "error", msg: "Guruh kunlari yo'q" };
 
-    // Generate cycles (12 lessons each)
+    const isEveryDay =
+      group.days === "Every day" ||
+      (Array.isArray(group.days) && group.days.includes("Every day"));
+
+    const getMonthlyLessonCount = (date) => {
+      if (isEveryDay) {
+        return getLessonsPerMonth(targetDays, date);
+      } else {
+        const daysPerWeek = targetDays.length;
+        return daysPerWeek * 4;
+      }
+    };
+
+    // Sikllarni yaratish
     let cycles = [];
-    let cycleLessonCount = 0;
-    let tempDate = new Date(startDate);
+    let currentCycleStart = new Date(startDate);
+    let cycleIndex = 1;
+
     const limitDate = new Date();
     limitDate.setFullYear(limitDate.getFullYear() + 2);
 
-    let currentCycleObj = {
-      index: 1,
-      startDate: new Date(startDate),
-      endDate: null,
-      lessons: 0,
-      isActive: false,
-    };
+    while (currentCycleStart <= limitDate) {
+      const monthLessonCount = getMonthlyLessonCount(currentCycleStart);
 
-    while (tempDate <= limitDate) {
-      if (targetDays.includes(tempDate.getDay())) {
-        cycleLessonCount++;
+      let lessonCounter = 0;
+      let cycleEndDate = new Date(currentCycleStart);
 
-        if (cycleLessonCount === 12) {
-          currentCycleObj.endDate = new Date(tempDate);
-          currentCycleObj.lessons = 12;
-          cycles.push({ ...currentCycleObj });
-
-          cycleLessonCount = 0;
-          currentCycleObj = {
-            index: cycles.length + 1,
-            startDate: new Date(tempDate),
-            endDate: null,
-            lessons: 0,
-            isActive: false,
-          };
-          currentCycleObj.startDate.setDate(
-            currentCycleObj.startDate.getDate() + 1,
-          );
+      while (lessonCounter < monthLessonCount && cycleEndDate <= limitDate) {
+        if (
+          !isHoliday(cycleEndDate) &&
+          targetDays.includes(cycleEndDate.getDay())
+        ) {
+          lessonCounter++;
+        }
+        if (lessonCounter < monthLessonCount) {
+          cycleEndDate.setDate(cycleEndDate.getDate() + 1);
         }
       }
-      if (tempDate.getTime() === todayDate.getTime()) {
-        currentCycleObj.isActive = true;
-      }
-      tempDate.setDate(tempDate.getDate() + 1);
+
+      if (cycleEndDate > limitDate) break;
+
+      const isActive =
+        currentCycleStart <= todayDate && cycleEndDate >= todayDate;
+
+      cycles.push({
+        index: cycleIndex,
+        startDate: new Date(currentCycleStart),
+        endDate: new Date(cycleEndDate),
+        lessonCount: monthLessonCount,
+        isActive: isActive,
+        status: "pending",
+      });
+
+      currentCycleStart = new Date(cycleEndDate);
+      currentCycleStart.setDate(currentCycleStart.getDate() + 1);
+      cycleIndex++;
     }
 
-    // Calculate balance and debts
+    // Qolgan logika
     let remainingMoney = totalPaid;
     let debts = [];
 
-    const passedCycles = cycles.filter(
-      (c) => c.endDate && c.endDate < todayDate,
-    );
-    let activeCycle = cycles.find(
-      (c) => c.startDate <= todayDate && (!c.endDate || c.endDate >= todayDate),
-    );
+    const passedCycles = cycles.filter((c) => c.endDate < todayDate);
+    const activeCycle = cycles.find((c) => c.isActive);
 
     passedCycles.forEach((cycle) => {
       if (remainingMoney >= coursePrice) {
@@ -137,39 +190,53 @@ export const usePaymentUtils = (
         cycle.paidAmount = remainingMoney;
         cycle.debtAmount = coursePrice - remainingMoney;
         remainingMoney = 0;
-        debts.push(cycle);
+        debts.push({
+          startDate: cycle.startDate,
+          endDate: cycle.endDate,
+          debtAmount: cycle.debtAmount,
+          cycleIndex: cycle.index,
+        });
       } else {
         cycle.status = "unpaid";
         cycle.debtAmount = coursePrice;
-        debts.push(cycle);
+        debts.push({
+          startDate: cycle.startDate,
+          endDate: cycle.endDate,
+          debtAmount: cycle.debtAmount,
+          cycleIndex: cycle.index,
+        });
       }
     });
 
-    // Calculate current cycle status
     let currentStatusInfo = {
       lessonsPassed: 0,
-      totalLessons: 12,
+      totalLessons: activeCycle ? activeCycle.lessonCount : 12,
       statusType: "new",
       text: "Jarayonda",
       isPaid: false,
-      lessonsLeft: 12,
+      lessonsLeft: activeCycle ? activeCycle.lessonCount : 12,
+      lessonCount: activeCycle ? activeCycle.lessonCount : 12,
     };
 
     let finalStatus = "active";
     let badgeText = "Yangi / Kutilmoqda";
 
     if (activeCycle) {
-      let dCounter = 0;
-      let dTemp = new Date(activeCycle.startDate);
-      while (dTemp <= todayDate) {
-        if (targetDays.includes(dTemp.getDay())) dCounter++;
-        dTemp.setDate(dTemp.getDate() + 1);
-      }
-      if (dCounter > 12) dCounter = 12;
+      const lessonsPassed = getLessonsInPeriod(
+        targetDays,
+        activeCycle.startDate,
+        todayDate,
+      );
 
-      const lessonsLeft = 12 - dCounter;
-      currentStatusInfo.lessonsPassed = dCounter;
-      currentStatusInfo.lessonsLeft = lessonsLeft;
+      const totalLessonsInCycle = activeCycle.lessonCount;
+      const lessonsLeft = totalLessonsInCycle - lessonsPassed;
+
+      currentStatusInfo.lessonsPassed = Math.min(
+        lessonsPassed,
+        totalLessonsInCycle,
+      );
+      currentStatusInfo.lessonsLeft = Math.max(0, lessonsLeft);
+      currentStatusInfo.totalLessons = totalLessonsInCycle;
 
       if (remainingMoney >= coursePrice) {
         currentStatusInfo.statusType = "paid";
@@ -180,7 +247,7 @@ export const usePaymentUtils = (
       } else {
         if (remainingMoney > 0) currentStatusInfo.paid = remainingMoney;
 
-        if (dCounter === 12) {
+        if (lessonsPassed >= totalLessonsInCycle) {
           currentStatusInfo.statusType = "urgent";
           currentStatusInfo.text = "Bugun muddat tugaydi";
           finalStatus = "urgent";
@@ -204,12 +271,21 @@ export const usePaymentUtils = (
     }
 
     if (debts.length > 0) {
-      if (finalStatus === "urgent") badgeText = "QARZ + TUGADI";
-      else {
+      if (finalStatus === "urgent") {
+        badgeText = "QARZ + TUGADI";
+      } else {
         finalStatus = "expired";
-        badgeText = `${debts.length} Oy qariz`;
+        const months = debts.length;
+        badgeText = months === 1 ? "1 oy qariz" : `${months} oy qariz`;
       }
     }
+
+    const needNotification =
+      (currentStatusInfo.lessonsLeft <= 3 &&
+        currentStatusInfo.lessonsLeft >= 0) ||
+      debts.length > 0 ||
+      (activeCycle &&
+        currentStatusInfo.lessonsPassed >= currentStatusInfo.totalLessons);
 
     return {
       totalPaid,
@@ -220,10 +296,7 @@ export const usePaymentUtils = (
       badgeText,
       lastPayment: studentPayments[0] || null,
       coursePrice,
-      needNotification:
-        (currentStatusInfo.lessonsLeft <= 3 &&
-          currentStatusInfo.lessonsLeft >= 0) ||
-        debts.length > 0,
+      needNotification,
       notificationType:
         debts.length > 0
           ? "debt"
@@ -237,19 +310,23 @@ export const usePaymentUtils = (
     };
   };
 
+  // Bu funksiya PaymentModal komponentida ishlatilmaydi, lekin boshqa joylarda kerak bo'lishi mumkin
   const sendPaymentSuccessNotification = useCallback(
     async (student, paymentData) => {
       if (!student.telegramId) return;
 
       const studentName = student.studentName || student.firstName || "";
       const studentLastName = student.lastName || "";
-      const formattedDate = new Date(paymentData.date).toLocaleDateString(
-        "uz-UZ",
-      );
+      const formattedDate = formatDateToUzbek(paymentData.date);
 
-      const message = `Assalomu alaykum ${studentName} ${studentLastName}! Siz ${formatMoney(
-        paymentData.amount,
-      )} miqdorida to'lov amalga oshirdingiz. To'lov sanasi: ${formattedDate}. Rahmat!`;
+      const message = `✅ <b>TO'LOV QABUL QILINDI</b>
+
+👤 ${studentName} ${studentLastName}
+💰 Summa: <b>${formatMoney(paymentData.amount)}</b>
+📅 Sana: <b>${formattedDate}</b>
+🏷 Tur: <b>${paymentData.type === "debt" ? "Qarz to'lovi" : "Joriy to'lov"}</b>
+
+✨ To'lovingiz uchun rahmat!`;
 
       try {
         const response = await fetch(
@@ -276,7 +353,7 @@ export const usePaymentUtils = (
         if (response.ok) {
           setNotificationLog((prev) => [
             {
-              date: new Date().toLocaleTimeString(),
+              date: formatDateToUzbek(new Date().toISOString()),
               count: 1,
               details: [
                 {
@@ -294,7 +371,13 @@ export const usePaymentUtils = (
         console.error("Payment notification error:", error);
       }
     },
-    [selectedGroupId, todayStr, formatMoney, setNotificationLog],
+    [
+      selectedGroupId,
+      todayStr,
+      formatMoney,
+      setNotificationLog,
+      formatDateToUzbek,
+    ],
   );
 
   const handlePaymentSubmit = useCallback(
@@ -307,7 +390,8 @@ export const usePaymentUtils = (
       setLoading,
       setShowModal,
       setAmount,
-      sendPaymentSuccessNotification,
+      // BU PARAMETR Endi ishlatilmaydi, lekin API ni buzmaslik uchun qoldirilgan
+      sendPaymentSuccessNotificationCallback,
     ) => {
       if (!amount || Number(amount) <= 0) {
         toast.error("Summani kiriting!");
@@ -323,9 +407,9 @@ export const usePaymentUtils = (
         let note = "";
         if (paymentType === "debt" && selectedDebtCycleIndex !== null) {
           const debt = selectedStudent.info.debts[selectedDebtCycleIndex];
-          const dStart = debt.startDate.toLocaleDateString("uz-UZ");
-          const dEnd = debt.endDate.toLocaleDateString("uz-UZ");
-          note = `Qarz to'lovi: ${dStart} - ${dEnd}`;
+          const dStart = formatDateToUzbek(debt.startDate);
+          const dEnd = formatDateToUzbek(debt.endDate);
+          note = `Qarz to'lovi: ${dStart} — ${dEnd}`;
         } else {
           note = "Joriy to'lov";
         }
@@ -345,12 +429,17 @@ export const usePaymentUtils = (
           createdAt: serverTimestamp(),
           type: paymentType,
           note: note,
+          formattedDate: formatDateToUzbek(paymentDate),
         };
 
+        // Faqat to'lovni saqlaymiz, xabar yuborilmaydi
         await addDoc(collection(db, "payments"), paymentData);
-        await sendPaymentSuccessNotification(selectedStudent, paymentData);
 
-        toast.success("To'lov qabul qilindi va xabar yuborildi!");
+        // MUHIM: Bu qatorni o'chirib tashladik!
+        // Xabar endi PaymentModal komponentida yuboriladi
+        // await sendPaymentSuccessNotification(selectedStudent, paymentData);
+
+        toast.success("To'lov qabul qilindi!");
         setShowModal(false);
         setAmount("");
         return true;
@@ -361,13 +450,13 @@ export const usePaymentUtils = (
         setLoading(false);
       }
     },
-    [selectedGroupId, groups],
+    [selectedGroupId, groups, formatDateToUzbek],
   );
 
   return {
     formatMoney,
     calculateStudentStatus,
-    sendPaymentSuccessNotification,
+    sendPaymentSuccessNotification, // Bu funksiya boshqa joylarda ishlatilishi mumkin
     handlePaymentSubmit,
   };
 };

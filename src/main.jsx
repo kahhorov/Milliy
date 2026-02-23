@@ -10,7 +10,17 @@ import { store } from "./store/store.js";
 import { ToastContainer } from "react-toastify";
 createRoot(document.getElementById("root")).render(
   <Provider store={store}>
-    <ToastContainer position="top-right" />
+    <ToastContainer
+      position="top-right"
+      autoClose={3000}
+      hideProgressBar={false}
+      newestOnTop={false}
+      closeOnClick
+      rtl={false}
+      pauseOnFocusLoss
+      draggable
+      pauseOnHover
+    />
     <App />
-  </Provider>
+  </Provider>,
 );

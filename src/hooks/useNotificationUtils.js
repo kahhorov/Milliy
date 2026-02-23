@@ -1,3 +1,4 @@
+// hooks/useNotificationUtils.js
 import { useCallback } from "react";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { db } from "../firebase/firebase";
@@ -7,16 +8,15 @@ export const useNotificationUtils = (
   formatMoney,
   calculateStudentStatus,
   setNotificationLog,
+  formatDateToUzbek,
 ) => {
   const checkAndSendGlobalNotifications = useCallback(async () => {
     const todayStr = new Date().toLocaleDateString("en-CA");
     const todayKey = `notification_check_${todayStr}`;
 
-    // Bugun allaqachon tekshirilganmi?
     if (localStorage.getItem(todayKey)) return;
 
     try {
-      // Barcha guruhlarni olish
       const groupsSnapshot = await getDocs(collection(db, "groups"));
       const allGroups = groupsSnapshot.docs.map((doc) => ({
         id: doc.id,
@@ -27,7 +27,6 @@ export const useNotificationUtils = (
       const notificationsToSend = [];
       const logEntries = [];
 
-      // Har bir guruh uchun o'quvchilarni olish
       for (const group of allGroups) {
         const studentsSnapshot = await getDocs(
           collection(db, "groups", group.id, "students"),
@@ -37,9 +36,7 @@ export const useNotificationUtils = (
           ...doc.data(),
         }));
 
-        // Har bir o'quvchi uchun hisoblash
         for (const student of groupStudents) {
-          // To'lovlarini olish
           const paymentsQuery = query(
             collection(db, "payments"),
             where("studentId", "==", student.id),
@@ -50,17 +47,15 @@ export const useNotificationUtils = (
             ...doc.data(),
           }));
 
-          // Statusni hisoblash
           const info = calculateStudentStatus(student, group, studentPayments);
 
-          // Agar to'lagan bo'lsa yoki telegram ID bo'lmasa, o'tkazib yubor
           if (info.isPaidForCurrentCycle || !student.telegramId) continue;
 
-          // Bugun yuborilganmi?
           const storageKey = `global_notif_${student.id}_${todayStr}`;
           if (localStorage.getItem(storageKey)) continue;
 
           const lessonsLeft = info.currentCycle.lessonsLeft;
+          const totalLessons = info.currentCycle.totalLessons || 12;
           const hasDebt = info.debts.length > 0;
           const totalDebt = info.debts.reduce(
             (sum, d) => sum + (d.debtAmount || 0),
@@ -74,48 +69,46 @@ export const useNotificationUtils = (
           const studentLastName = student.lastName || "";
           const fullName = `<b>${studentName} ${studentLastName}</b>`;
 
-          // O'quvchining to'liq ismini chiroyli formatlash
-
           if (lessonsLeft === 0 && !hasDebt) {
-            // 🚨 TUGASH OGOHLANTIRISHI
             message = `<b>🚨 DIQQAT: TO'LOV MUDDATI TUGADI</b>
 
- 👤 Hurmatli ${fullName}!
+👤 Hurmatli ${fullName}!
 
-  Sizning to'lov muddatingiz <b>bugun</b> o'z nihoyasiga yetdi.
+Sizning to'lov muddatingiz <b>bugun</b> o'z nihoyasiga yetdi.
+Bu oyda jami <b>${totalLessons} ta dars</b> bo'lib, barchasi tugadi.
 
-  Mashg'ulotlarda uzluksiz qatnashish va guruhdan chetlatilmaslik uchun to'lovni <b>bugun</b> amalga oshirishingizni so'raymiz.
+Mashg'ulotlarda uzluksiz qatnashish va guruhdan chetlatilmaslik uchun to'lovni <b>bugun</b> amalga oshirishingizni so'raymiz.
 -------------------------------------------------------------------
-  💳 <i>To'lovni markazimizga kelib tolang yoki elektron tarizda</i>`;
+💳 <i>To'lovni markazimizga kelib tolang yoki elektron tarizda</i>`;
 
             notificationType = "last_day_warning";
           } else if (hasDebt) {
-            // ⛔️ QARZDORLIK
             message = `<b>⛔️ TO'LANMAGAN QARZDORLIK</b>
 
- 👤 Hurmatli ${fullName}!
+👤 Hurmatli ${fullName}!
 
-  Sizning hisobingizda to'lanmagan qarzdorlik mavjud.
+Sizning hisobingizda to'lanmagan qarzdorlik mavjud.
 
-  📉 Qarz miqdori: <b>${formatMoney(totalDebt)}.000</b>
+📉 Qarz miqdori: <b>${formatMoney(totalDebt)}</b>
 
- Iltimos, ushbu qarzdorlikni tez orada to'lang. Aks holda guruhdan \n chetlatilishingiz mumkin.`;
+Iltimos, ushbu qarzdorlikni tez orada to'lang. Aks holda guruhdan chetlatilishingiz mumkin.`;
 
             notificationType = "debt";
           } else if (lessonsLeft <= 3 && lessonsLeft > 0) {
-            // ⏳ ESLATMA
             message = `<b>⏳ TO'LOV MUDDATI ESLATMASI</b>
 
- 👤 Hurmatli ${fullName}!
+👤 Hurmatli ${fullName}!
 
-  Tolovga <b>${lessonsLeft} ta</b> dars qoldi.
-  Mashg'ulotlaringiz to'xtab qolmasligi uchun to'lovni o'z vaqtida tolashingizni eslatib o'tamiz.
+Bu oyda jami <b>${totalLessons} ta dars</b> bo'lib, 
+to'lovga <b>${lessonsLeft} ta</b> dars qoldi.
+
+Mashg'ulotlaringiz to'xtab qolmasligi uchun to'lovni o'z vaqtida tolashingizni eslatib o'tamiz.
 -------------------------------------------------------------------
-  ✨ <i>Biz bilan birga ekanligingizdan xursandmiz!</i>`;
+✨ <i>Biz bilan birga ekanligingizdan xursandmiz!</i>`;
 
             notificationType = "reminder";
           } else {
-            continue; // Boshqa holatlarda xabar yuborma
+            continue;
           }
 
           notificationsToSend.push({
@@ -138,7 +131,6 @@ export const useNotificationUtils = (
         }
       }
 
-      // Xabarlarni yuborish
       if (notificationsToSend.length > 0) {
         try {
           const response = await fetch(
@@ -154,7 +146,6 @@ export const useNotificationUtils = (
           );
 
           if (response.ok) {
-            // LocalStorage'ga yozish
             notificationsToSend.forEach((n) => {
               localStorage.setItem(
                 `global_notif_${n.studentId}_${todayStr}`,
@@ -162,13 +153,11 @@ export const useNotificationUtils = (
               );
             });
 
-            // Umumiy tekshiruvni belgilash
             localStorage.setItem(todayKey, "true");
 
-            // Log'ni yangilash
             setNotificationLog((prev) => [
               {
-                date: new Date().toLocaleString("uz-UZ"),
+                date: formatDateToUzbek(new Date().toISOString()),
                 count: totalNotifications,
                 details: logEntries,
                 type: "auto_global",
@@ -187,9 +176,13 @@ export const useNotificationUtils = (
     } catch (error) {
       console.error("Global notification check error:", error);
     }
-  }, [formatMoney, calculateStudentStatus, setNotificationLog]);
+  }, [
+    formatMoney,
+    calculateStudentStatus,
+    setNotificationLog,
+    formatDateToUzbek,
+  ]);
 
-  // Manual message yuborish funksiyasi
   const handleSendManualMessage = useCallback(
     async (
       msgGroupId,
@@ -244,7 +237,7 @@ export const useNotificationUtils = (
         if (response.ok) {
           setNotificationLog((prev) => [
             {
-              date: new Date().toLocaleTimeString(),
+              date: formatDateToUzbek(new Date().toISOString()),
               count: 1,
               details: [
                 {
@@ -274,7 +267,7 @@ export const useNotificationUtils = (
         setSendingMsg(false);
       }
     },
-    [setNotificationLog],
+    [setNotificationLog, formatDateToUzbek],
   );
 
   return {

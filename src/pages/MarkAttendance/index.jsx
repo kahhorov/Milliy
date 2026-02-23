@@ -7,10 +7,8 @@ import {
   Modal,
   InputNumber,
   Stack,
-  Loader,
   Message,
   toaster,
-  Input,
 } from "rsuite";
 import {
   collection,

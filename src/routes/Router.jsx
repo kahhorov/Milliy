@@ -6,6 +6,7 @@ import Login from "../pages/Login";
 import ProtectedRoute from "./ProtectedRoute";
 
 // Sahifalar
+const Notifications = lazy(() => import("../pages/Notifications"));
 const Dashboard = lazy(() => import("../pages/Dashboard"));
 const DailyAttendance = lazy(() => import("../pages/DailyAttendance"));
 const AttendanceHistory = lazy(() => import("../pages/AttendanceHistory"));
@@ -38,6 +39,7 @@ function Router() {
         { path: "group/:id", element: <Group /> },
         { path: "add-payments", element: <AddPayments /> },
         { path: "payment-list", element: <PaymentList /> },
+        { path: "notifications", element: <Notifications /> },
       ],
     },
     {

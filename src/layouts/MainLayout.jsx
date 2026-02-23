@@ -12,10 +12,11 @@ import {
   Box,
 } from "rsuite";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { Outlet } from "react-router-dom";
 import { FaPlus } from "react-icons/fa6";
+import { useDispatch, useSelector } from "react-redux";
 // components
 import {
   SidebarNav,
@@ -24,11 +25,14 @@ import {
   CreateGroup,
   CreateStudent,
 } from "../components";
-import { useSelector } from "react-redux";
 import SidebarMenu from "../components/SidebarMenu";
+import { checkEndedHolidays } from "../utils/holidayNotificationChecker";
+import { addNotification } from "../createSlice/notificationSlice";
+
 // component function
 const MainLayout = () => {
   const { t } = useTranslation();
+  const dispatch = useDispatch();
   const [expanded, setExpanded] = useState(true);
   const [open, setOpen] = useState(false);
   const [studentModal, setStudentModal] = useState(false);
@@ -36,12 +40,35 @@ const MainLayout = () => {
   const [isMobile] = useMediaQuery("(max-width: 768px)");
   const isExpanded = expanded && !isMobile;
   const theme = useSelector((state) => state.theme.value);
+
+  // Tatil tugaganligini tekshirish
+  useEffect(() => {
+    // Sahifa yuklanganda tekshirish
+    checkEndedHolidays(dispatch, addNotification);
+
+    // Har daqiqada tekshirish (60000 ms = 1 daqiqa)
+    const interval = setInterval(() => {
+      checkEndedHolidays(dispatch, addNotification);
+    }, 60000);
+
+    // Cleanup function - komponent o'chirilganda intervalni tozalash
+    return () => clearInterval(interval);
+  }, [dispatch]);
+
+  // Theme o'zgarishini kuzatish
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+  }, [theme]);
+
   return (
     <Container
       style={{
         minHeight: "100vh",
-        background: theme === "light" ? "#fff" : "",
+        background: theme === "light" ? "#fff" : "#10151cde",
         padding: "10px",
+        display: "flex",
+        flexDirection: "row",
+        gap: "10px",
       }}
     >
       {/*create group modal */}
@@ -51,6 +78,7 @@ const MainLayout = () => {
         setStudentModal={setStudentModal}
         studentModal={studentModal}
       />
+
       {/* Sidebar qismi */}
       <Sidebar
         width={isExpanded ? 260 : 56}
@@ -93,6 +121,7 @@ const MainLayout = () => {
             style={{
               display: "flex",
               justifyContent: isExpanded ? "end" : "center",
+              padding: isExpanded ? "16px" : "8px",
             }}
           >
             <Whisper
@@ -117,6 +146,7 @@ const MainLayout = () => {
           </Sidenav.Footer>
         </Sidenav>
       </Sidebar>
+
       <Container>
         <Header
           style={{
@@ -129,6 +159,7 @@ const MainLayout = () => {
           {/* Navbar */}
           <SiteNavbar setExpanded={setExpanded} />
         </Header>
+
         {/* Asosiy Kontent */}
         <Center>
           <Content>

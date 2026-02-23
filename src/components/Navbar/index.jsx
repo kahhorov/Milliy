@@ -11,12 +11,15 @@ import { CiLight } from "react-icons/ci";
 import { useDispatch, useSelector } from "react-redux";
 import { changeTheme } from "../../createSlice/ThemeSlice";
 import ChangeLanguage from "../ChangeLanguage";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 //
+import NotificationBell from "../NotificationBell";
+import { checkEndedHolidays } from "../../utils/holidayNotificationChecker";
+import { addNotification } from "../../createSlice/notificationSlice";
 
 const Brand = ({ theme }) => (
   <Link
-    top={"/"}
+    to={"/"}
     style={{
       textDecoration: "none",
       color: theme === "light" ? "#343434" : "#fff",
@@ -33,10 +36,25 @@ function SiteNavbar({ setExpanded }) {
   // states
   const [open, setOpen] = useState(false);
   const handleOpen = () => setOpen(true);
-  //
+
   const theme = useSelector((state) => state.theme.value);
   const { t } = useTranslation();
   const dispatch = useDispatch();
+
+  // Tatil tugaganligini tekshirish
+  useEffect(() => {
+    // Sahifa yuklanganda tekshirish
+    checkEndedHolidays(dispatch, addNotification);
+
+    // Har daqiqada tekshirish (60000 ms = 1 daqiqa)
+    const interval = setInterval(() => {
+      checkEndedHolidays(dispatch, addNotification);
+    }, 60000);
+
+    // Cleanup function - komponent o'chirilganda intervalni tozalash
+    return () => clearInterval(interval);
+  }, [dispatch]);
+
   return (
     <Navbar
       rounded={"5px"}
@@ -50,7 +68,7 @@ function SiteNavbar({ setExpanded }) {
       {/*  */}
       <Navbar.Content showFrom="xs">
         <Link
-          top={"/"}
+          to={"/"}
           style={{
             textDecoration: "none",
             color: theme === "light" ? "#343434" : "#fff",
@@ -83,6 +101,9 @@ function SiteNavbar({ setExpanded }) {
           </Button>
         </Whisper>
 
+        {/* Notification Bell qo'shildi */}
+        <NotificationBell />
+
         <Whisper
           placement="bottom"
           controlId="control-id-hover"
@@ -107,6 +128,7 @@ function SiteNavbar({ setExpanded }) {
             )}
           </Button>
         </Whisper>
+
         <Whisper
           placement="bottom"
           controlId="control-id-hover"
@@ -121,6 +143,7 @@ function SiteNavbar({ setExpanded }) {
             <IoLanguageOutline size={20} />
           </Button>
         </Whisper>
+
         {/*  */}
         <HStack>
           <Avatar src="https://i.pravatar.cc/150?u=19" circle size="sm" />

@@ -81,11 +81,7 @@ function CreateStudentInput({
             autoComplete="off"
           />
         </InputGroup>
-        <Input
-          type="number"
-          placeholder={t("Telegram username")}
-          name="telegramId"
-        />
+        <Input type="number" placeholder={t("Telegram ID")} name="telegramId" />
         <InputPicker
           data={data}
           placeholder={t("Select group")}

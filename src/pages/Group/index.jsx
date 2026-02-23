@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback, useRef } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import {
   collection,
@@ -14,12 +14,12 @@ import {
   updateDoc,
   deleteDoc,
   writeBatch,
+  onSnapshot,
 } from "firebase/firestore";
 import { db } from "../../firebase/firebase";
 import { toast } from "react-toastify";
 import { useTranslation } from "react-i18next";
 import {
-  Accordion,
   Table,
   Pagination,
   Tag,
@@ -27,9 +27,7 @@ import {
   InputGroup,
   Input,
   Stack,
-  Divider,
   HStack,
-  Checkbox,
   IconButton,
   Modal,
   Form,
@@ -42,16 +40,31 @@ import {
   Whisper,
   Popover,
   Dropdown,
-  InputNumber,
+  Loader,
+  Badge,
+  Tooltip,
+  Avatar,
 } from "rsuite";
 import { useSelector } from "react-redux";
-import SearchIcon from "@rsuite/icons/Search";
-import CloseOutlineIcon from "@rsuite/icons/CloseOutline";
-import EditIcon from "@rsuite/icons/Edit";
-import TrashIcon from "@rsuite/icons/Trash";
-import RemindIcon from "@rsuite/icons/legacy/Remind";
-import MoreIcon from "@rsuite/icons/More";
-import { PiStudentThin } from "react-icons/pi";
+import {
+  FiSearch,
+  FiX,
+  FiEdit2,
+  FiTrash2,
+  FiMoreVertical,
+  FiUsers,
+  FiClock,
+  FiPhone,
+  FiAlertCircle,
+  FiChevronDown,
+  FiChevronUp,
+} from "react-icons/fi";
+import {
+  MdOutlineGroups,
+  MdOutlineEdit,
+  MdOutlineDelete,
+} from "react-icons/md";
+import { FaTelegram } from "react-icons/fa";
 
 const { Column, HeaderCell, Cell } = Table;
 
@@ -71,19 +84,23 @@ function Group() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const theme = useSelector((state) => state.theme.value);
+  const isDark = theme === "dark";
 
   // States
   const [groupData, setGroupData] = useState(null);
   const [students, setStudents] = useState([]);
   const [allGroups, setAllGroups] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [initialLoading, setInitialLoading] = useState(true);
   const [groupSearchLoading, setGroupSearchLoading] = useState(false);
+  const [accordionExpanded, setAccordionExpanded] = useState(true);
 
   const [activePage, setActivePage] = useState(1);
-  const [displayLimit] = useState(10);
+  const [displayLimit] = useState(20);
   const [totalStudents, setTotalStudents] = useState(0);
   const [lastDoc, setLastDoc] = useState(null);
   const [searchKeyword, setSearchKeyword] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
 
   const [selectedId, setSelectedId] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -94,6 +111,7 @@ function Group() {
     studentName: "",
     lastName: "",
     phoneNumber: "",
+    telegramId: "",
     targetGroupId: "",
     days: [],
   });
@@ -108,6 +126,44 @@ function Group() {
     value: day,
   }));
 
+  // Debounce search
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchKeyword);
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchKeyword]);
+
+  // Search effect
+  useEffect(() => {
+    if (!id) return;
+    setActivePage(1);
+    fetchTotalCount(debouncedSearch);
+    loadData(1, true, debouncedSearch);
+  }, [debouncedSearch, id]);
+
+  // Real-time students listener
+  useEffect(() => {
+    if (!id) return;
+
+    const studentsRef = collection(db, "groups", id, "students");
+    const q = query(studentsRef, orderBy("studentName"), limit(displayLimit));
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const list = snapshot.docs.map((doc) => ({
+        id: doc.id,
+        ...doc.data(),
+        days: processDays(doc.data().days),
+      }));
+      setStudents(list);
+      setLastDoc(snapshot.docs[snapshot.docs.length - 1]);
+      setInitialLoading(false);
+    });
+
+    return () => unsubscribe();
+  }, [id, displayLimit]);
+
   // 3 nuqta menu uchun render function
   const renderMenu = ({ onClose, left, top, className }, ref) => {
     const handleSelect = (eventKey) => {
@@ -120,13 +176,28 @@ function Group() {
     };
 
     return (
-      <Popover ref={ref} className={className} style={{ left, top }} full>
+      <Popover
+        ref={ref}
+        className={`${className} ${isDark ? "dark-menu" : ""}`}
+        style={{ left, top, zIndex: 9999 }}
+        arrow={false}
+      >
         <Dropdown.Menu onSelect={handleSelect}>
-          <Dropdown.Item eventKey={1} icon={<EditIcon />}>
-            {t("edit_group")}
+          <Dropdown.Item
+            eventKey={1}
+            icon={<MdOutlineEdit className="text-blue-500" size={18} />}
+          >
+            <span className={isDark ? "text-gray-200" : "text-gray-700"}>
+              {t("edit_group")}
+            </span>
           </Dropdown.Item>
-          <Dropdown.Item eventKey={2} icon={<TrashIcon />}>
-            {t("delete_group")}
+          <Dropdown.Item
+            eventKey={2}
+            icon={<MdOutlineDelete className="text-red-500" size={18} />}
+          >
+            <span className={isDark ? "text-gray-200" : "text-gray-700"}>
+              {t("delete_group")}
+            </span>
           </Dropdown.Item>
         </Dropdown.Menu>
       </Popover>
@@ -183,12 +254,12 @@ function Group() {
   );
 
   const loadData = useCallback(
-    async (pageNum = 1, isNewSearch = false) => {
+    async (pageNum = 1, isNewSearch = false, search = "") => {
       setLoading(true);
       try {
         const studentsRef = collection(db, "groups", id, "students");
         let q;
-        const trimmedSearch = searchKeyword.trim();
+        const trimmedSearch = search.trim();
 
         if (trimmedSearch !== "") {
           q = query(
@@ -226,21 +297,21 @@ function Group() {
         setLoading(false);
       }
     },
-    [id, searchKeyword, displayLimit, lastDoc, t, processDays],
+    [id, displayLimit, lastDoc, t, processDays],
   );
 
   const fetchAllGroups = async (search = "") => {
     setGroupSearchLoading(true);
     try {
       const groupsRef = collection(db, "groups");
-      let q = query(groupsRef, orderBy("groupName"), limit(20));
+      let q = query(groupsRef, orderBy("groupName"), limit(50)); // Increased limit for better UX
       if (search) {
         q = query(
           groupsRef,
           orderBy("groupName"),
           where("groupName", ">=", search),
           where("groupName", "<=", search + "\uf8ff"),
-          limit(20),
+          limit(50),
         );
       }
       const querySnapshot = await getDocs(q);
@@ -267,7 +338,6 @@ function Group() {
           days: processDays(data.days || data.weekdays || []),
         });
 
-        // Group edit uchun ham to'ldiramiz
         setGroupEditData({
           groupName: data.groupName || "",
           lessonTime: data.lessonTime || "",
@@ -287,16 +357,23 @@ function Group() {
       await loadGroupData();
       fetchAllGroups();
       fetchTotalCount("");
-      loadData(1, true);
     };
     init();
-  }, [id, navigate, processDays, fetchTotalCount]);
+  }, [id]);
 
   const handleEditOpen = (rowData) => {
     const uiDays = rowData.days.includes("Everyday")
       ? ALL_WORKING_DAYS
       : rowData.days;
-    setEditData({ ...rowData, targetGroupId: id, days: uiDays });
+    setSelectedId(rowData.id);
+    setEditData({
+      studentName: rowData.studentName || "",
+      lastName: rowData.lastName || "",
+      phoneNumber: rowData.phoneNumber || "",
+      telegramId: rowData.telegramId || "",
+      targetGroupId: id,
+      days: uiDays,
+    });
     setShowEditModal(true);
   };
 
@@ -330,6 +407,7 @@ function Group() {
             studentName: editData.studentName,
             lastName: editData.lastName,
             phoneNumber: editData.phoneNumber,
+            telegramId: editData.telegramId || "",
             days: finalDaysToSave,
           },
         );
@@ -342,6 +420,7 @@ function Group() {
           studentName: editData.studentName,
           lastName: editData.lastName,
           phoneNumber: editData.phoneNumber,
+          telegramId: editData.telegramId || "",
           days: finalDaysToSave,
         });
         toast.success(t("student_updated_successfully"));
@@ -349,9 +428,9 @@ function Group() {
 
       setShowEditModal(false);
       setSelectedId(null);
-      await fetchTotalCount(searchKeyword);
-      await loadData(1, true);
+      await fetchTotalCount(debouncedSearch);
     } catch (error) {
+      console.error("Update error:", error);
       toast.error(t("error_occurred"));
     } finally {
       setLoading(false);
@@ -365,8 +444,7 @@ function Group() {
       toast.success(t("student_deleted_successfully"));
       setShowDeleteModal(false);
       setSelectedId(null);
-      await fetchTotalCount(searchKeyword);
-      await loadData(1, true);
+      await fetchTotalCount(debouncedSearch);
     } catch (error) {
       toast.error(t("error_deleting_student"));
     } finally {
@@ -397,13 +475,11 @@ function Group() {
         groupName: groupEditData.groupName,
         lessonTime: groupEditData.lessonTime,
         days: finalDays,
-        weekdays: finalDays, // Eski field ni ham yangilaymiz
+        weekdays: finalDays,
       });
 
       toast.success(t("group_updated_successfully"));
       setShowGroupEditModal(false);
-
-      // Yangi ma'lumotlarni yuklash
       await loadGroupData();
     } catch (error) {
       console.error("Group update error:", error);
@@ -416,7 +492,6 @@ function Group() {
   const handleGroupDelete = async () => {
     setLoading(true);
     try {
-      // Avval guruhdagi barcha studentlarni o'chirish
       const studentsRef = collection(db, "groups", id, "students");
       const studentsSnapshot = await getDocs(studentsRef);
 
@@ -428,13 +503,10 @@ function Group() {
         await batch.commit();
       }
 
-      // Guruhni o'chirish
       await deleteDoc(doc(db, "groups", id));
 
       toast.success(t("group_deleted_successfully"));
       setShowGroupDeleteModal(false);
-
-      // Asosiy sahifaga qaytish
       navigate("/");
     } catch (error) {
       console.error("Group delete error:", error);
@@ -444,704 +516,530 @@ function Group() {
     }
   };
 
-  const triggerSearch = () => {
-    setActivePage(1);
-    fetchTotalCount(searchKeyword);
-    loadData(1, true);
+  const toggleAccordion = (e) => {
+    e.stopPropagation();
+    setAccordionExpanded(!accordionExpanded);
   };
+
+  if (initialLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader size="lg" content={t("loading")} vertical />
+      </div>
+    );
+  }
 
   return (
     <div
-      style={{
-        padding: "clamp(10px, 2vw, 20px)",
-        backgroundColor: theme === "dark" ? "#0F131A" : "#FAFAFA",
-        minHeight: "100vh",
-      }}
+      className={`min-h-screen p-4 md:p-6 ${isDark ? "bg-gray-900" : "bg-gray-50"}`}
     >
-      <style>{`
-    .rs-table {
-      background: ${theme === "dark" ? "#0F131A" : "#fcfcfc"} !important;
-    }
-    
-    .rs-table-cell {
-      background: ${theme === "dark" ? "#1b212b !important" : "#fff !important"};
-      border: 1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"} !important;
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"} !important;
-    }
-    
-    .rs-table-header-cell {
-      background: ${theme === "dark" ? "#1a1d24 !important" : "#f8f9fa !important"};
-      border: 1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"} !important;
-      color: ${theme === "dark" ? "#cbd5e0" : "#4a5568"} !important;
-      font-weight: 600 !important;
-    }
-    
-    .rs-table-row:hover .rs-table-cell {
-      background: ${theme === "dark" ? "#2d3748 !important" : "#f7fafc !important"} !important;
-    }
-    
-    .rs-table-row-selected .rs-table-cell {
-      background: ${theme === "dark" ? "#2a4365 !important" : "#ebf8ff !important"} !important;
-      border-color: ${theme === "dark" ? "#4299e1" : "#3182ce"} !important;
-    }
-    
-    .modal-themed .rs-modal-content {
-      background: ${theme === "dark" ? "#1a1d24" : "#fff"};
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"};
-      border: 1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"};
-    }
-    
-    .modal-themed .rs-modal-header {
-      border-bottom: 1px solid ${theme === "dark" ? "#2d3748" : "#436795"};
-      padding: 16px 20px;
-    }
-    
-    .modal-themed .rs-modal-body {
-      padding: 20px;
-    }
-    
-    .modal-themed .rs-modal-footer {
-      border-top: 1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"};
-      padding: 16px 20px;
-    }
-    
-    .modal-themed .rs-modal-title {
-      color: ${theme === "dark" ? "#fff" : "#2d3748"};
-      font-weight: 600;
-    }
-    
-    .modal-themed .rs-input,
-    .modal-themed .rs-picker-toggle {
-      background: ${theme === "dark" ? "#2d3748" : "#fff"};
-      border: 1px solid ${theme === "dark" ? "#4a5568" : "#e2e8f0"};
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"};
-    }
-    
-    .modal-themed .rs-input:focus,
-    .modal-themed .rs-picker-toggle-active {
-      border-color: ${theme === "dark" ? "#4299e1" : "#3182ce"};
-      box-shadow: 0 0 0 2px ${theme === "dark" ? "rgba(66, 153, 225, 0.3)" : "rgba(49, 130, 206, 0.3)"};
-    }
-    
-    .modal-themed .rs-form-control-label {
-      color: ${theme === "dark" ? "#cbd5e0" : "#4a5568"} !important;
-      font-weight: 500;
-    }
-    
-    .rs-picker-menu,
-    .rs-checkbox-menu,
-    .rs-select-menu {
-      background: ${theme === "dark" ? "#1a1d24" : "#fff"} !important;
-      border: 1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"} !important;
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"} !important;
-    }
-    
-    .rs-picker-select-menu-item:hover,
-    .rs-check-item:hover {
-      background: ${theme === "dark" ? "#2d3748" : "#f7fafc"} !important;
-    }
-    
-    .rs-picker-select-menu-item.rs-picker-select-menu-item-active,
-    .rs-check-item.rs-check-item-checked {
-      background: ${theme === "dark" ? "#2a4365" : "#ebf8ff"} !important;
-      color: ${theme === "dark" ? "#90cdf4" : "#3182ce"} !important;
-    }
-    
-    .rs-pagination {
-      color: ${theme === "dark" ? "#cbd5e0" : "#718096"};
-    }
-    
-    .rs-pagination-btn {
-      color: ${theme === "dark" ? "#cbd5e0" : "#718096"} !important;
-      background: ${theme === "dark" ? "#2d3748" : "#fff"} !important;
-      border: 1px solid ${theme === "dark" ? "#4a5568" : "#e2e8f0"} !important;
-    }
-    
-    .rs-pagination-btn:hover {
-      background: ${theme === "dark" ? "#4a5568" : "#f7fafc"} !important;
-    }
-    
-    .rs-pagination-btn.rs-pagination-btn-active {
-      background: ${theme === "dark" ? "#4299e1" : "#3182ce"} !important;
-      color: white !important;
-      border-color: ${theme === "dark" ? "#4299e1" : "#3182ce"} !important;
-    }
-    
-    .rs-accordion {
-      background: ${theme === "dark" ? "#1a1d24" : "transparent"};
-      border: 1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"};
-    }
-    
-    .rs-accordion-item {
-      border-bottom: 1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"};
-    }
-    
-    .rs-accordion-item-active {
-      border-color: ${theme === "dark" ? "#4299e1" : "#3182ce"};
-    }
-    
-    .rs-accordion-toggle {
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"};
-      background: ${theme === "dark" ? "#1a1d24" : "#f8f9fa"};
-    }
-    
-    .rs-accordion-toggle:hover {
-      background: ${theme === "dark" ? "#2d3748" : "#edf2f7"};
-    }
-    
-    .rs-accordion-toggle.rs-accordion-toggle-focus {
-      box-shadow: 0 0 0 2px ${theme === "dark" ? "rgba(66, 153, 225, 0.3)" : "rgba(49, 130, 206, 0.3)"};
-    }
-    
-    .rs-btn-primary {
-      background: ${theme === "dark" ? "#4299e1" : "#3182ce"} !important;
-      border-color: ${theme === "dark" ? "#4299e1" : "#3182ce"} !important;
-    }
-    
-    .rs-btn-primary:hover {
-      background: ${theme === "dark" ? "#3182ce" : "#2c5282"} !important;
-      border-color: ${theme === "dark" ? "#3182ce" : "#2c5282"} !important;
-    }
-    
-    .rs-btn-subtle {
-      color: ${theme === "dark" ? "#cbd5e0" : "#718096"} !important;
-    }
-    
-    .rs-btn-subtle:hover {
-      background: ${theme === "dark" ? "#2d3748" : "#f7fafc"} !important;
-      color: ${theme === "dark" ? "#fff" : "#2d3748"} !important;
-    }
-    
-    .rs-tag {
-      background: ${theme === "dark" ? "#2d3748" : "#f7fafc"};
-      border: 1px solid ${theme === "dark" ? "#4a5568" : "#e2e8f0"};
-      color: ${theme === "dark" ? "#cbd5e0" : "#4a5568"};
-    }
-    
-    .rs-tag-blue {
-      background: ${theme === "dark" ? "#2a4365" : "#ebf8ff"};
-      border-color: ${theme === "dark" ? "#4299e1" : "#90cdf4"};
-      color: ${theme === "dark" ? "#90cdf4" : "#3182ce"};
-    }
-    
-    .rs-tag-green {
-      background: ${theme === "dark" ? "#22543d" : "#f0fff4"};
-      border-color: ${theme === "dark" ? "#48bb78" : "#9ae6b4"};
-      color: ${theme === "dark" ? "#9ae6b4" : "#276749"};
-    }
-    
-    .rs-tag-cyan {
-      background: ${theme === "dark" ? "#234e52" : "#e6fffa"};
-      border-color: ${theme === "dark" ? "#38b2ac" : "#81e6d9"};
-      color: ${theme === "dark" ? "#81e6d9" : "#285e61"};
-    }
-    
-    .rs-btn-icon {
-      color: ${theme === "dark" ? "#cbd5e0" : "#718096"};
-    }
-    
-    .rs-btn-icon:hover {
-      background: ${theme === "dark" ? "#2d3748" : "#2f658a"};
-      color: ${theme === "dark" ? "#fff" : "#2d3748"};
-    }
-    
-    .rs-btn-icon.rs-btn-icon-with-text {
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"};
-    }
-    
-    .rs-checkbox-checker {
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"} !important;
-    }
-    
-    .rs-checkbox-checked .rs-checkbox-inner:before {
-      border-color: ${theme === "dark" ? "#4299e1" : "#3182ce"};
-      background: ${theme === "dark" ? "#4299e1" : "#3182ce"};
-    }
-    
-    .rs-input-group {
-      background: ${theme === "dark" ? "#2d3748" : "#fff"};
-      border: 1px solid ${theme === "dark" ? "#4a5568" : "#e2e8f0"};
-    }
-    
-    .rs-input-group .rs-input {
-      background: transparent;
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"};
-    }
-    
-    .rs-input-group .rs-input::placeholder {
-      color: ${theme === "dark" ? "#a0aec0" : "#a0aec0"};
-    }
-    
-    .rs-input-group-addon {
-      background: ${theme === "dark" ? "#4a5568" : "#edf2f7"};
-      border-color: ${theme === "dark" ? "#4a5568" : "#e2e8f0"};
-      color: ${theme === "dark" ? "#cbd5e0" : "#718096"};
-    }
-    
-    .rs-input-group-btn .rs-btn {
-      background: ${theme === "dark" ? "#4a5568" : "#edf2f7"};
-      border-color: ${theme === "dark" ? "#4a5568" : "#e2e8f0"};
-      color: ${theme === "dark" ? "#cbd5e0" : "#718096"};
-    }
-    
-    .rs-input-group-btn .rs-btn:hover {
-      background: ${theme === "dark" ? "#718096" : "#e2e8f0"};
-    }
-    
-    .capitalize-text { text-transform: capitalize; }
-    
-    /* Dropdown menu theming */
-    .rs-dropdown-menu {
-      background: ${theme === "dark" ? "#1a1d24" : "#fff"} !important;
-      border: 1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"} !important;
-      box-shadow: 0 4px 6px ${theme === "dark" ? "rgba(0, 0, 0, 0.3)" : "rgba(0, 0, 0, 0.1)"};
-    }
-    
-    .rs-dropdown-item {
-      color: ${theme === "dark" ? "#e2e8f0" : "#2d3748"} !important;
-    }
-    
-    .rs-dropdown-item:hover {
-      background: ${theme === "dark" ? "#2d3748" : "#f7fafc"} !important;
-    }
-    
-    .rs-dropdown-item .rs-icon {
-      color: ${theme === "dark" ? "#90cdf4" : "#3182ce"};
-    }
-  `}</style>
-
-      <Stack justifyContent="space-between" style={{ marginBottom: 20 }}>
-        <Stack spacing={10}>
-          <h4
-            style={{
-              margin: 0,
-              color: theme === "dark" ? "#fff" : "#2d3748",
-              fontWeight: 600,
-            }}
-          >
-            {t("Students")}
-          </h4>
-          <Divider
-            vertical
-            style={{
-              backgroundColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-            }}
-          />
-          <HStack
-            spacing={6}
-            style={{
-              color: theme === "dark" ? "#90cdf4" : "#3182ce",
-              alignItems: "center",
-            }}
-          >
-            <PiStudentThin size={20} />
-            <span
-              style={{
-                fontWeight: 500,
-                color: theme === "dark" ? "#cbd5e0" : "#4a5568",
-              }}
-            >
-              {totalStudents}
-            </span>
-          </HStack>
-        </Stack>
-
-        <InputGroup inside style={{ width: 300 }}>
-          <Input
-            placeholder={t("search_placeholder")}
-            value={searchKeyword}
-            onChange={setSearchKeyword}
-            onPressEnter={triggerSearch}
-            style={{
-              backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-              color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-              borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-            }}
-          />
-          {searchKeyword && (
-            <InputGroup.Button
-              onClick={() => setSearchKeyword("")}
-              style={{
-                backgroundColor: theme === "dark" ? "#4a5568" : "#edf2f7",
-                borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-              }}
-            >
-              <CloseOutlineIcon
-                style={{
-                  color: theme === "dark" ? "#cbd5e0" : "#718096",
-                }}
-              />
-            </InputGroup.Button>
-          )}
-          <InputGroup.Button onClick={triggerSearch}>
-            <SearchIcon
-              style={{
-                color: theme === "dark" ? "#eeeeee" : "#3182ce",
-              }}
-            />
-          </InputGroup.Button>
-        </InputGroup>
-      </Stack>
-
-      <Accordion
-        bordered
-        defaultActiveKey={1}
-        style={{
-          background: theme === "dark" ? "#1a1d24" : "#fff",
-          borderColor: theme === "dark" ? "#2A2C31" : "#E4E4E7",
-          borderRadius: "8px",
-          overflow: "hidden",
-        }}
-      >
-        <Accordion.Panel
-          header={
-            <Stack
-              justifyContent="space-between"
-              alignItems="center"
-              style={{ padding: "12px 16px", width: "100%" }}
-            >
-              <Stack spacing={15} style={{ flex: 1 }}>
-                <span
-                  style={{
-                    fontWeight: 700,
-                    fontSize: "1.1rem",
-                    color: theme === "dark" ? "#fff" : "#2d3748",
-                  }}
-                >
-                  {groupData?.groupName || "---"}
-                </span>
-                <Tag
-                  color="blue"
-                  variant="filled"
-                  style={{
-                    backgroundColor: theme === "dark" ? "#2a4365" : "#ebf8ff",
-                    borderColor: theme === "dark" ? "#4299e1" : "#90cdf4",
-                    color: theme === "dark" ? "#90cdf4" : "#3182ce",
-                    fontWeight: 500,
-                  }}
-                >
-                  {groupData?.lessonTime}
-                </Tag>
-                {groupData?.days?.includes("Everyday") && (
-                  <Tag
-                    color="green"
-                    style={{
-                      backgroundColor: theme === "dark" ? "#22543d" : "#f0fff4",
-                      borderColor: theme === "dark" ? "#48bb78" : "#9ae6b4",
-                      color: theme === "dark" ? "#9ae6b4" : "#276749",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {t("Everyday")}
-                  </Tag>
-                )}
-              </Stack>
-
-              {/* 3 nuqta menu */}
-              <Whisper
-                placement="bottomEnd"
-                trigger="click"
-                speaker={renderMenu}
-                controlId={`dropdown-${id}`}
-              >
-                <IconButton
-                  size="sm"
-                  appearance="subtle"
-                  icon={<MoreIcon />}
-                  style={{
-                    color: theme === "dark" ? "#cbd5e0" : "#718096",
-                    backgroundColor: theme === "dark" ? "#2d3748" : "#f7fafc",
-                    border: `1px solid ${theme === "dark" ? "#4a5568" : "#e2e8f0"}`,
-                  }}
-                />
-              </Whisper>
-            </Stack>
-          }
-          bodyFill
+      {/* Header */}
+      <div className="mb-6">
+        <h1
+          className={`text-2xl font-bold ${isDark ? "text-white" : "text-gray-800"}`}
         >
-          <Table
-            height={450}
-            data={students}
-            loading={loading}
-            cellBordered
-            rowHeight={60}
-            headerHeight={50}
-            style={{
-              backgroundColor: theme === "dark" ? "#1b212b" : "#fff",
-            }}
-          >
-            <Column width={50} align="center" fixed>
-              <HeaderCell style={{ fontSize: "10px" }}>{t("Check")}</HeaderCell>
-              <Cell>
-                {(rowData) => (
-                  <Checkbox
-                    checked={selectedId === rowData.id}
-                    onChange={(v, checked) =>
-                      setSelectedId(checked ? rowData.id : null)
-                    }
-                    style={{
-                      color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                    }}
-                  />
-                )}
-              </Cell>
-            </Column>
-            <Column width={60} align="center">
-              <HeaderCell>№</HeaderCell>
-              <Cell>
-                {(r, i) => (
-                  <span
-                    style={{
-                      color: theme === "dark" ? "#cbd5e0" : "#718096",
-                      fontWeight: 500,
-                    }}
-                  >
-                    {(activePage - 1) * displayLimit + i + 1}
-                  </span>
-                )}
-              </Cell>
-            </Column>
-            <Column width={180}>
-              <HeaderCell>{t("Student name")}</HeaderCell>
-              <Cell className="capitalize-text" dataKey="studentName">
-                {(rowData) => (
-                  <span
-                    style={{ color: theme === "dark" ? "#e2e8f0" : "#2d3748" }}
-                  >
-                    {rowData.studentName}
-                  </span>
-                )}
-              </Cell>
-            </Column>
-            <Column width={180}>
-              <HeaderCell>{t("Student lastName")}</HeaderCell>
-              <Cell className="capitalize-text" dataKey="lastName">
-                {(rowData) => (
-                  <span
-                    style={{ color: theme === "dark" ? "#e2e8f0" : "#2d3748" }}
-                  >
-                    {rowData.lastName}
-                  </span>
-                )}
-              </Cell>
-            </Column>
-            <Column width={160}>
-              <HeaderCell>{t("phone")}</HeaderCell>
-              <Cell>
-                {(r) => (
-                  <span
-                    style={{
-                      color: theme === "dark" ? "#90cdf4" : "#3182ce",
-                      fontWeight: 500,
-                    }}
-                  >
-                    +998 {r.phoneNumber}
-                  </span>
-                )}
-              </Cell>
-            </Column>
-            <Column width={120} fixed="right">
-              <HeaderCell>{t("actions")}</HeaderCell>
-              <Cell>
-                {(rowData) =>
-                  selectedId === rowData.id && (
-                    <Stack spacing={8}>
-                      <IconButton
-                        size="sm"
-                        color="blue"
-                        appearance="subtle"
-                        icon={<EditIcon />}
-                        onClick={() => handleEditOpen(rowData)}
-                        style={{
-                          color: theme === "dark" ? "#90cdf4" : "#3182ce",
-                          backgroundColor:
-                            theme === "dark" ? "#2a4365" : "#ebf8ff",
-                          border: `1px solid ${theme === "dark" ? "#4299e1" : "#90cdf4"}`,
-                        }}
-                      />
-                      <IconButton
-                        size="sm"
-                        color="red"
-                        appearance="subtle"
-                        icon={<TrashIcon />}
-                        onClick={() => setShowDeleteModal(true)}
-                        style={{
-                          color: theme === "dark" ? "#fc8181" : "#e53e3e",
-                          backgroundColor:
-                            theme === "dark" ? "#742a2a" : "#fed7d7",
-                          border: `1px solid ${theme === "dark" ? "#f56565" : "#fc8181"}`,
-                        }}
-                      />
-                    </Stack>
-                  )
-                }
-              </Cell>
-            </Column>
-            <Column minWidth={250} flexGrow={1}>
-              <HeaderCell>{t("Weekdays")}</HeaderCell>
-              <Cell>
-                {(rowData) => (
-                  <TagGroup>
-                    {rowData.days.includes("Everyday") ? (
-                      <Tag
-                        color="green"
-                        variant="filled"
-                        style={{
-                          backgroundColor:
-                            theme === "dark" ? "#22543d" : "#f0fff4",
-                          borderColor: theme === "dark" ? "#48bb78" : "#9ae6b4",
-                          color: theme === "dark" ? "#9ae6b4" : "#276749",
-                        }}
-                      >
-                        {t("Everyday")}
-                      </Tag>
-                    ) : (
-                      rowData.days.map((day) => (
-                        <Tag
-                          key={day}
-                          color="cyan"
-                          style={{
-                            backgroundColor:
-                              theme === "dark" ? "#234e52" : "#e6fffa",
-                            borderColor:
-                              theme === "dark" ? "#38b2ac" : "#81e6d9",
-                            color: theme === "dark" ? "#81e6d9" : "#285e61",
-                            marginRight: 4,
-                            marginBottom: 4,
-                          }}
-                        >
-                          {t(day)}
-                        </Tag>
-                      ))
-                    )}
-                  </TagGroup>
-                )}
-              </Cell>
-            </Column>
-          </Table>
-          <div
-            style={{
-              padding: 20,
-              backgroundColor: theme === "dark" ? "#1a1d24" : "#fff",
-              borderTop: `1px solid ${theme === "dark" ? "#2d3748" : "#e2e8f0"}`,
-            }}
-          >
-            <Pagination
-              total={totalStudents}
-              limit={displayLimit}
-              activePage={activePage}
-              onChangePage={(p) => {
-                setActivePage(p);
-                loadData(p);
-              }}
-              first
-              last
-              ellipsis
-              boundaryLinks
-              style={{
-                color: theme === "dark" ? "#cbd5e0" : "#718096",
-              }}
-            />
-          </div>
-        </Accordion.Panel>
-      </Accordion>
+          {t("group_details")}
+        </h1>
+        <p className={`text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`}>
+          {t("manage_students_and_group_settings")}
+        </p>
+      </div>
 
-      {/* Student Edit Modal */}
+      {/* Group Accordion */}
+      <div
+        className={`rounded-xl border overflow-hidden mb-6 ${
+          isDark ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"
+        }`}
+      >
+        {/* Accordion Header */}
+        <div
+          className={`p-4 cursor-pointer flex items-center justify-between ${
+            isDark ? "hover:bg-gray-700" : "hover:bg-gray-50"
+          }`}
+          onClick={toggleAccordion}
+        >
+          <div className="flex items-center gap-4 flex-wrap">
+            <div className="flex items-center gap-2">
+              <MdOutlineGroups
+                size={24}
+                className={isDark ? "text-blue-400" : "text-blue-600"}
+              />
+              <span
+                className={`font-bold text-lg ${
+                  isDark ? "text-white" : "text-gray-800"
+                }`}
+              >
+                {groupData?.groupName || "---"}
+              </span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <Badge
+                color="blue"
+                content={
+                  <div className="flex items-center gap-1">
+                    <FiClock size={12} />
+                    <span>{groupData?.lessonTime}</span>
+                  </div>
+                }
+              />
+
+              {groupData?.days?.includes("Everyday") ? (
+                <Tag
+                  color="green"
+                  className="!rounded-full !px-3 !py-1 text-xs font-medium"
+                >
+                  {t("Everyday")}
+                </Tag>
+              ) : (
+                <TagGroup>
+                  {groupData?.days?.map((day) => (
+                    <Tag
+                      key={day}
+                      color="cyan"
+                      className="!rounded-full !px-3 !py-1 text-xs font-medium"
+                    >
+                      {t(day)}
+                    </Tag>
+                  ))}
+                </TagGroup>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1">
+              <FiUsers
+                size={16}
+                className={isDark ? "text-gray-400" : "text-gray-500"}
+              />
+              <span
+                className={`text-sm font-medium ${
+                  isDark ? "text-gray-300" : "text-gray-600"
+                }`}
+              >
+                {totalStudents} {t("students")}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2">
+            {/* 3 nuqta menu */}
+            <Whisper
+              placement="bottomEnd"
+              trigger="click"
+              speaker={renderMenu}
+              controlId={`dropdown-${id}`}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <IconButton
+                size="sm"
+                appearance="subtle"
+                icon={<FiMoreVertical size={18} />}
+                className={`!rounded-full ${
+                  isDark
+                    ? "text-gray-400 hover:text-white hover:bg-gray-700"
+                    : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                }`}
+                onClick={(e) => e.stopPropagation()}
+              />
+            </Whisper>
+
+            {/* Accordion toggle icon */}
+            {accordionExpanded ? (
+              <FiChevronUp
+                size={20}
+                className={isDark ? "text-gray-400" : "text-gray-500"}
+              />
+            ) : (
+              <FiChevronDown
+                size={20}
+                className={isDark ? "text-gray-400" : "text-gray-500"}
+              />
+            )}
+          </div>
+        </div>
+
+        {/* Accordion Content */}
+        {accordionExpanded && (
+          <div className="p-4 border-t border-gray-200 dark:border-gray-700">
+            {/* Search Bar */}
+            <div className="mb-4">
+              <InputGroup inside className="w-full md:w-96">
+                <Input
+                  placeholder={t("search_placeholder")}
+                  value={searchKeyword}
+                  onChange={setSearchKeyword}
+                  className={
+                    isDark ? "bg-gray-700 text-white border-gray-600" : ""
+                  }
+                />
+                {searchKeyword && (
+                  <InputGroup.Button
+                    onClick={() => setSearchKeyword("")}
+                    className={isDark ? "bg-gray-700 border-gray-600" : ""}
+                  >
+                    <FiX
+                      className={isDark ? "text-gray-400" : "text-gray-500"}
+                    />
+                  </InputGroup.Button>
+                )}
+                <InputGroup.Button
+                  className={isDark ? "bg-gray-700 border-gray-600" : ""}
+                >
+                  <FiSearch
+                    className={isDark ? "text-blue-400" : "text-blue-600"}
+                  />
+                </InputGroup.Button>
+              </InputGroup>
+            </div>
+
+            {/* Students Table */}
+            <div className="w-full overflow-x-auto">
+              <Table
+                height={450}
+                data={students}
+                loading={loading}
+                cellBordered
+                rowHeight={70}
+                headerHeight={50}
+                className={`w-full rounded-lg overflow-hidden ${
+                  isDark ? "dark-table" : ""
+                }`}
+                style={{ width: "100%" }}
+              >
+                <Column width={60} align="center" fixed>
+                  <HeaderCell className="text-xs font-bold uppercase">
+                    {t("№")}
+                  </HeaderCell>
+                  <Cell>
+                    {(rowData, index) => (
+                      <span
+                        className={`font-medium ${
+                          isDark ? "text-gray-300" : "text-gray-600"
+                        }`}
+                      >
+                        {(activePage - 1) * displayLimit + index + 1}
+                      </span>
+                    )}
+                  </Cell>
+                </Column>
+                <Column width={250} flexGrow={1}>
+                  <HeaderCell className="text-xs font-bold uppercase">
+                    {t("student_name")}
+                  </HeaderCell>
+                  <Cell>
+                    {(rowData) => (
+                      <div className="flex items-center gap-2">
+                        <Avatar
+                          circle
+                          size="sm"
+                          className="bg-blue-100 text-blue-600"
+                        >
+                          {(rowData.studentName || "?").charAt(0)}
+                        </Avatar>
+                        <div>
+                          <div
+                            className={`font-medium ${
+                              isDark ? "text-white" : "text-gray-800"
+                            }`}
+                          >
+                            {rowData.studentName} {rowData.lastName}
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </Cell>
+                </Column>
+                <Column width={180}>
+                  <HeaderCell className="text-xs font-bold uppercase">
+                    {t("phone")}
+                  </HeaderCell>
+                  <Cell>
+                    {(rowData) => (
+                      <div className="flex items-center gap-2">
+                        <FiPhone
+                          size={14}
+                          className={isDark ? "text-gray-400" : "text-gray-500"}
+                        />
+                        <span
+                          className={`text-sm ${
+                            isDark ? "text-gray-300" : "text-gray-600"
+                          }`}
+                        >
+                          +998 {rowData.phoneNumber}
+                        </span>
+                      </div>
+                    )}
+                  </Cell>
+                </Column>
+                <Column width={180}>
+                  <HeaderCell className="text-xs font-bold uppercase">
+                    {t("telegram")}
+                  </HeaderCell>
+                  <Cell>
+                    {(rowData) => (
+                      <div className="flex items-center gap-2">
+                        {rowData.telegramId ? (
+                          <>
+                            <FaTelegram className="text-blue-500" size={16} />
+                            <span
+                              className={`text-sm ${
+                                isDark ? "text-gray-300" : "text-gray-600"
+                              }`}
+                            >
+                              {rowData.telegramId}
+                            </span>
+                          </>
+                        ) : (
+                          <span
+                            className={`text-sm italic ${
+                              isDark ? "text-gray-500" : "text-gray-400"
+                            }`}
+                          >
+                            {t("not_set")}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </Cell>
+                </Column>
+                <Column width={220}>
+                  <HeaderCell className="text-xs font-bold uppercase">
+                    {t("weekdays")}
+                  </HeaderCell>
+                  <Cell>
+                    {(rowData) => (
+                      <TagGroup>
+                        {rowData.days.includes("Everyday") ? (
+                          <Tag
+                            color="green"
+                            className="!rounded-full !px-3 !py-1 text-xs font-medium"
+                          >
+                            {t("Everyday")}
+                          </Tag>
+                        ) : (
+                          <div className="flex w-full justify-center items-center gap-2">
+                            {rowData.days.map((day) => (
+                              <Tag
+                                key={day}
+                                color="cyan"
+                                className="!rounded-full !px-3 !py-1 !text-[10px] font-light"
+                              >
+                                {t(day.slice(0, 3))}
+                              </Tag>
+                            ))}
+                          </div>
+                        )}
+                      </TagGroup>
+                    )}
+                  </Cell>
+                </Column>
+                <Column width={120} fixed="right">
+                  <HeaderCell className="text-xs font-bold uppercase">
+                    {t("actions")}
+                  </HeaderCell>
+                  <Cell>
+                    {(rowData) => (
+                      <HStack spacing={6}>
+                        <Whisper
+                          trigger="hover"
+                          placement="top"
+                          speaker={<Tooltip>{t("edit")}</Tooltip>}
+                        >
+                          <IconButton
+                            size="sm"
+                            appearance="subtle"
+                            icon={<FiEdit2 size={16} />}
+                            onClick={() => handleEditOpen(rowData)}
+                            className={`!rounded-full ${
+                              isDark
+                                ? "text-blue-400 hover:bg-blue-900/30"
+                                : "text-blue-600 hover:bg-blue-50"
+                            }`}
+                          />
+                        </Whisper>
+
+                        <Whisper
+                          trigger="hover"
+                          placement="top"
+                          speaker={<Tooltip>{t("delete")}</Tooltip>}
+                        >
+                          <IconButton
+                            size="sm"
+                            appearance="subtle"
+                            icon={<FiTrash2 size={16} />}
+                            onClick={() => {
+                              setSelectedId(rowData.id);
+                              setShowDeleteModal(true);
+                            }}
+                            className={`!rounded-full ${
+                              isDark
+                                ? "text-red-400 hover:bg-red-900/30"
+                                : "text-red-600 hover:bg-red-50"
+                            }`}
+                          />
+                        </Whisper>
+                      </HStack>
+                    )}
+                  </Cell>
+                </Column>
+              </Table>
+            </div>
+
+            {/* Pagination */}
+            <div className="mt-4 flex justify-end">
+              <Pagination
+                total={totalStudents}
+                limit={displayLimit}
+                activePage={activePage}
+                onChangePage={(p) => {
+                  setActivePage(p);
+                  loadData(p, false, debouncedSearch);
+                }}
+                first
+                last
+                ellipsis
+                boundaryLinks
+                size="md"
+                className={isDark ? "dark-pagination" : ""}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Edit Student Modal */}
       <Modal
         open={showEditModal}
         onClose={() => setShowEditModal(false)}
         size="md"
-        className="modal-themed"
-        backdrop={true}
+        backdrop="static"
+        className={`modal-themed ${isDark ? "dark" : ""}`}
       >
         <Modal.Header>
-          <Modal.Title>{t("edit_student_title")}</Modal.Title>
+          <Modal.Title className="flex items-center gap-2">
+            <FiEdit2 className="text-blue-500" size={24} />
+            <span>{t("edit_student")}</span>
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <Form fluid onChange={setEditData} formValue={editData}>
             <Grid fluid>
-              <Row>
+              <Row className="mb-4">
                 <Col xs={12}>
                   <Form.Group>
-                    <Form.ControlLabel>{t("Student name")}</Form.ControlLabel>
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("first_name")} *
+                    </Form.ControlLabel>
                     <Form.Control
                       name="studentName"
-                      style={{
-                        backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-                        color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                        borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-                      }}
+                      className={
+                        isDark ? "bg-gray-700 text-white border-gray-600" : ""
+                      }
                     />
                   </Form.Group>
                 </Col>
                 <Col xs={12}>
                   <Form.Group>
-                    <Form.ControlLabel>
-                      {t("Student lastName")}
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("last_name")}
                     </Form.ControlLabel>
                     <Form.Control
                       name="lastName"
-                      style={{
-                        backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-                        color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                        borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-                      }}
+                      className={
+                        isDark ? "bg-gray-700 text-white border-gray-600" : ""
+                      }
                     />
                   </Form.Group>
                 </Col>
               </Row>
-              <Row style={{ marginTop: 15 }}>
+
+              <Row className="mb-4">
                 <Col xs={12}>
                   <Form.Group>
-                    <Form.ControlLabel>
-                      {t("Student phoneNumber")}
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("phone_number")} *
                     </Form.ControlLabel>
-                    <Form.Control
-                      name="phoneNumber"
-                      style={{
-                        backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-                        color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                        borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-                      }}
-                    />
+                    <InputGroup
+                      className={isDark ? "bg-gray-700 border-gray-600" : ""}
+                    >
+                      <InputGroup.Addon
+                        className={isDark ? "bg-gray-600 text-gray-300" : ""}
+                      >
+                        +998
+                      </InputGroup.Addon>
+                      <Form.Control
+                        name="phoneNumber"
+                        className={
+                          isDark ? "bg-gray-700 text-white border-gray-600" : ""
+                        }
+                      />
+                    </InputGroup>
                   </Form.Group>
                 </Col>
                 <Col xs={12}>
                   <Form.Group>
-                    <Form.ControlLabel>{t("change_group")}</Form.ControlLabel>
-                    <Form.Control
-                      name="targetGroupId"
-                      accepter={SelectPicker}
-                      data={allGroups}
-                      block
-                      cleanable={false}
-                      loading={groupSearchLoading}
-                      onSearch={fetchAllGroups}
-                      onOpen={() => fetchAllGroups("")}
-                      style={{
-                        backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-                        color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                        borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-                      }}
-                    />
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("telegram_id")}
+                    </Form.ControlLabel>
+                    <InputGroup
+                      className={isDark ? "bg-gray-700 border-gray-600" : ""}
+                    >
+                      <InputGroup.Addon
+                        className={isDark ? "bg-gray-600 text-gray-300" : ""}
+                      >
+                        <FaTelegram size={16} className="text-blue-500" />
+                      </InputGroup.Addon>
+                      <Form.Control
+                        name="telegramId"
+                        className={
+                          isDark ? "bg-gray-700 text-white border-gray-600" : ""
+                        }
+                      />
+                    </InputGroup>
                   </Form.Group>
                 </Col>
               </Row>
-              <Row style={{ marginTop: 15 }}>
+
+              <Row className="mb-4">
                 <Col xs={24}>
                   <Form.Group>
-                    <Form.ControlLabel>{t("Weekdays")}</Form.ControlLabel>
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("change_group")}
+                    </Form.ControlLabel>
+                    <div style={{ maxHeight: "200px", overflowY: "auto" }}>
+                      <Form.Control
+                        name="targetGroupId"
+                        accepter={SelectPicker}
+                        data={allGroups}
+                        block
+                        cleanable={false}
+                        loading={groupSearchLoading}
+                        onSearch={fetchAllGroups}
+                        onOpen={() => fetchAllGroups("")}
+                        className={isDark ? "dark-picker" : ""}
+                        menuStyle={{ maxHeight: 200, overflow: "auto" }}
+                        listProps={{
+                          style: { maxHeight: 200, overflow: "auto" },
+                        }}
+                      />
+                    </div>
+                  </Form.Group>
+                </Col>
+              </Row>
+
+              <Row>
+                <Col xs={24}>
+                  <Form.Group>
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("weekdays")}
+                    </Form.ControlLabel>
                     <Form.Control
                       name="days"
                       accepter={CheckPicker}
                       data={weekDaysOptions}
                       block
-                      placeholder={t("Select week days")}
-                      style={{
-                        backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-                        color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                        borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-                      }}
+                      placeholder={t("select_weekdays")}
+                      className={isDark ? "dark-picker" : ""}
                     />
                   </Form.Group>
                 </Col>
@@ -1155,75 +1053,58 @@ function Group() {
             appearance="primary"
             color="blue"
             loading={loading}
+            className="!px-6 !py-2"
           >
-            {t("Save")}
+            {t("save_changes")}
           </Button>
           <Button
             onClick={() => setShowEditModal(false)}
             appearance="subtle"
-            style={{
-              color: theme === "dark" ? "#cbd5e0" : "#718096",
-            }}
+            className={isDark ? "text-gray-300" : ""}
           >
-            {t("Cancel")}
+            {t("cancel")}
           </Button>
         </Modal.Footer>
       </Modal>
 
-      {/* Student Delete Modal */}
+      {/* Delete Student Modal */}
       <Modal
         backdrop="static"
         role="alertdialog"
         open={showDeleteModal}
         onClose={() => setShowDeleteModal(false)}
         size="xs"
-        className="modal-themed"
+        className={`modal-themed ${isDark ? "dark" : ""}`}
       >
-        <Modal.Body style={{ textAlign: "center" }}>
-          <RemindIcon
-            style={{
-              color: theme === "dark" ? "#f6ad55" : "#dd6b20",
-              fontSize: 54,
-            }}
-          />
+        <Modal.Body className="text-center py-6">
+          <FiAlertCircle className="text-red-500 mx-auto mb-4" size={48} />
           <h4
-            style={{
-              marginTop: 20,
-              color: theme === "dark" ? "#fff" : "#2d3748",
-            }}
+            className={`text-lg font-bold mb-2 ${isDark ? "text-white" : "text-gray-800"}`}
           >
-            {t("delete_confirm_title")}
+            {t("delete_student_title")}
           </h4>
           <p
-            style={{
-              opacity: 0.7,
-              color: theme === "dark" ? "#cbd5e0" : "#718096",
-            }}
+            className={`text-sm ${isDark ? "text-gray-400" : "text-gray-500"}`}
           >
-            {t("delete_confirm_desc")}
+            {t("delete_student_confirm")}
           </p>
         </Modal.Body>
-        <Modal.Footer>
+        <Modal.Footer className="border-t pt-4">
           <Button
             onClick={confirmDelete}
             color="red"
             appearance="primary"
             loading={loading}
-            style={{
-              backgroundColor: theme === "dark" ? "#c53030" : "#e53e3e",
-              borderColor: theme === "dark" ? "#c53030" : "#e53e3e",
-            }}
+            className="!px-6 !py-2"
           >
-            {t("delete_button")}
+            {t("delete")}
           </Button>
           <Button
             onClick={() => setShowDeleteModal(false)}
             appearance="subtle"
-            style={{
-              color: theme === "dark" ? "#cbd5e0" : "#718096",
-            }}
+            className={isDark ? "text-gray-300" : ""}
           >
-            {t("Cancel")}
+            {t("cancel")}
           </Button>
         </Modal.Footer>
       </Modal>
@@ -1233,59 +1114,61 @@ function Group() {
         open={showGroupEditModal}
         onClose={() => setShowGroupEditModal(false)}
         size="md"
-        className="modal-themed"
-        backdrop={true}
+        backdrop="static"
+        className={`modal-themed ${isDark ? "dark" : ""}`}
       >
         <Modal.Header>
-          <Modal.Title>{t("edit_group_title")}</Modal.Title>
+          <Modal.Title className="flex items-center gap-2">
+            <MdOutlineEdit className="text-blue-500" size={24} />
+            <span>{t("edit_group")}</span>
+          </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <Form fluid onChange={setGroupEditData} formValue={groupEditData}>
             <Grid fluid>
-              <Row>
+              <Row className="mb-4">
                 <Col xs={12}>
                   <Form.Group>
-                    <Form.ControlLabel>{t("group_name")}</Form.ControlLabel>
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("group_name")} *
+                    </Form.ControlLabel>
                     <Form.Control
                       name="groupName"
-                      style={{
-                        backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-                        color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                        borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-                      }}
+                      className={
+                        isDark ? "bg-gray-700 text-white border-gray-600" : ""
+                      }
                     />
                   </Form.Group>
                 </Col>
                 <Col xs={12}>
                   <Form.Group>
-                    <Form.ControlLabel>{t("lesson_time")}</Form.ControlLabel>
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("lesson_time")} *
+                    </Form.ControlLabel>
                     <Form.Control
                       name="lessonTime"
-                      style={{
-                        backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-                        color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                        borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-                      }}
-                      placeholder="e.g., 14:00-16:00"
+                      placeholder="14:00-16:00"
+                      className={
+                        isDark ? "bg-gray-700 text-white border-gray-600" : ""
+                      }
                     />
                   </Form.Group>
                 </Col>
               </Row>
-              <Row style={{ marginTop: 15 }}>
+
+              <Row>
                 <Col xs={24}>
                   <Form.Group>
-                    <Form.ControlLabel>{t("Weekdays")}</Form.ControlLabel>
+                    <Form.ControlLabel className="text-sm font-medium">
+                      {t("weekdays")}
+                    </Form.ControlLabel>
                     <Form.Control
                       name="days"
                       accepter={CheckPicker}
                       data={weekDaysOptions}
                       block
-                      placeholder={t("Select week days")}
-                      style={{
-                        backgroundColor: theme === "dark" ? "#2d3748" : "#fff",
-                        color: theme === "dark" ? "#e2e8f0" : "#2d3748",
-                        borderColor: theme === "dark" ? "#4a5568" : "#e2e8f0",
-                      }}
+                      placeholder={t("select_weekdays")}
+                      className={isDark ? "dark-picker" : ""}
                     />
                   </Form.Group>
                 </Col>
@@ -1299,17 +1182,16 @@ function Group() {
             appearance="primary"
             color="blue"
             loading={loading}
+            className="!px-6 !py-2"
           >
-            {t("Save")}
+            {t("save_changes")}
           </Button>
           <Button
             onClick={() => setShowGroupEditModal(false)}
             appearance="subtle"
-            style={{
-              color: theme === "dark" ? "#cbd5e0" : "#718096",
-            }}
+            className={isDark ? "text-gray-300" : ""}
           >
-            {t("Cancel")}
+            {t("cancel")}
           </Button>
         </Modal.Footer>
       </Modal>
@@ -1321,66 +1203,143 @@ function Group() {
         open={showGroupDeleteModal}
         onClose={() => setShowGroupDeleteModal(false)}
         size="xs"
-        className="modal-themed"
+        className={`modal-themed ${isDark ? "dark" : ""}`}
       >
-        <Modal.Body style={{ textAlign: "center" }}>
-          <RemindIcon
-            style={{
-              color: theme === "dark" ? "#f56565" : "#e53e3e",
-              fontSize: 54,
-            }}
-          />
+        <Modal.Body className="text-center py-6">
+          <FiAlertCircle className="text-red-500 mx-auto mb-4" size={48} />
           <h4
-            style={{
-              marginTop: 20,
-              color: theme === "dark" ? "#fff" : "#2d3748",
-            }}
+            className={`text-lg font-bold mb-2 ${isDark ? "text-white" : "text-gray-800"}`}
           >
-            {t("delete_group_confirm_title")}
+            {t("delete_group_title")}
           </h4>
           <p
-            style={{
-              opacity: 0.7,
-              color: theme === "dark" ? "#cbd5e0" : "#718096",
-              marginBottom: 10,
-            }}
+            className={`text-sm mb-2 ${isDark ? "text-gray-400" : "text-gray-500"}`}
           >
-            {t("delete_group_confirm_desc")}
+            {t("delete_group_confirm")}
           </p>
-          <p
-            style={{
-              color: theme === "dark" ? "#fc8181" : "#e53e3e",
-              fontWeight: 500,
-              fontSize: 14,
-            }}
-          >
+          <p className="text-sm font-medium text-red-500">
             ⚠️ {t("delete_group_warning")}
           </p>
         </Modal.Body>
-        <Modal.Footer>
+        <Modal.Footer className="border-t pt-4">
           <Button
             onClick={handleGroupDelete}
             color="red"
             appearance="primary"
             loading={loading}
-            style={{
-              backgroundColor: theme === "dark" ? "#c53030" : "#e53e3e",
-              borderColor: theme === "dark" ? "#c53030" : "#e53e3e",
-            }}
+            className="!px-6 !py-2"
           >
-            {t("delete_group_button")}
+            {t("delete_group")}
           </Button>
           <Button
             onClick={() => setShowGroupDeleteModal(false)}
             appearance="subtle"
-            style={{
-              color: theme === "dark" ? "#cbd5e0" : "#718096",
-            }}
+            className={isDark ? "text-gray-300" : ""}
           >
-            {t("Cancel")}
+            {t("cancel")}
           </Button>
         </Modal.Footer>
       </Modal>
+
+      {/* CSS Styles */}
+      <style jsx>{`
+        .dark-table .rs-table-cell {
+          background-color: #1a1d24 !important;
+          border-color: #2d3748 !important;
+          color: #e2e8f0 !important;
+        }
+
+        .dark-table .rs-table-header-cell {
+          background-color: #2d3748 !important;
+          border-color: #4a5568 !important;
+          color: #cbd5e0 !important;
+        }
+
+        .dark-table .rs-table-row:hover .rs-table-cell {
+          background-color: #2d3748 !important;
+        }
+
+        .dark-pagination .rs-pagination-btn {
+          background-color: #2d3748 !important;
+          border-color: #4a5568 !important;
+          color: #cbd5e0 !important;
+        }
+
+        .dark-pagination .rs-pagination-btn:hover {
+          background-color: #4a5568 !important;
+        }
+
+        .dark-pagination .rs-pagination-btn.rs-pagination-btn-active {
+          background-color: #4299e1 !important;
+          border-color: #4299e1 !important;
+          color: white !important;
+        }
+
+        .dark-picker .rs-picker-toggle {
+          background-color: #2d3748 !important;
+          border-color: #4a5568 !important;
+          color: #e2e8f0 !important;
+        }
+
+        .dark-picker .rs-picker-toggle:hover {
+          background-color: #4a5568 !important;
+        }
+
+        .dark-picker .rs-picker-menu {
+          max-height: 200px !important;
+          overflow: auto !important;
+        }
+
+        .dark-menu .rs-popover-content {
+          background-color: #1a1d24 !important;
+          border-color: #2d3748 !important;
+        }
+
+        .dark-menu .rs-dropdown-item {
+          color: #e2e8f0 !important;
+        }
+
+        .dark-menu .rs-dropdown-item:hover {
+          background-color: #2d3748 !important;
+        }
+
+        .modal-themed.dark .rs-modal-content {
+          background-color: #1a1d24;
+          color: #e2e8f0;
+        }
+
+        .modal-themed.dark .rs-modal-header {
+          border-bottom-color: #2d3748;
+        }
+
+        .modal-themed.dark .rs-modal-footer {
+          border-top-color: #2d3748;
+        }
+
+        .modal-themed.dark .rs-modal-title {
+          color: white;
+        }
+
+        .modal-themed.dark .rs-form-control-label {
+          color: #cbd5e0 !important;
+        }
+
+        /* Select Picker scroll styles */
+        .rs-picker-select-menu {
+          max-height: 200px !important;
+          overflow-y: auto !important;
+        }
+
+        .rs-picker-select-menu-items {
+          max-height: 200px !important;
+          overflow-y: auto !important;
+        }
+
+        .rs-picker-menu {
+          max-height: 200px !important;
+          overflow-y: auto !important;
+        }
+      `}</style>
     </div>
   );
 }
