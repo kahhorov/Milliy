@@ -88,7 +88,7 @@ const HolidayEndModal = ({
           <p
             className={`text-sm ${theme === "light" ? "text-slate-500" : "text-slate-400"} text-center`}
           >
-            Ertadan darslar boshlanadi. O'quvchilarga xabar yuborildi.
+            Ertadan darslar boshlanadi. Oʻquvchilarga xabar yuborildi.
           </p>
         </div>
 

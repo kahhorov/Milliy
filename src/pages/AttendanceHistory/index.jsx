@@ -198,13 +198,13 @@ const AttendanceManagement = () => {
     );
   };
 
-  // Export uchun guruhlar ro'yxatini tayyorlash (badge bilan)
+  // Export uchun guruhlar roʻyxatini tayyorlash (badge bilan)
   const groupOptions = useMemo(() => {
     const uniqueGroups = [...new Set(attendanceData.map((g) => g.groupName))];
     return uniqueGroups.map((name) => {
       const exists = isGroupExists(name);
       return {
-        // Label sifatida to'g'ridan-to'g'ri JSX element
+        // Label sifatida toʻg'ridan-toʻg'ri JSX element
         label: (
           <div
             className="flex items-center justify-between w-full gap-2"
@@ -238,7 +238,7 @@ const AttendanceManagement = () => {
           </div>
         ),
         value: name,
-        // Qo'shimcha ma'lumotlar
+        // Qoʻshimcha ma'lumotlar
         rawLabel: name,
         exists: exists,
       };
@@ -251,7 +251,7 @@ const AttendanceManagement = () => {
     const worksheet = workbook.addWorksheet("Davomat Hisoboti");
 
     worksheet.columns = [
-      { width: 8 }, // №
+      { width: 8 }, // в„–
       { width: 35 }, // F.I.SH
       { width: 20 }, // Telefon
       { width: 15 }, // Holati
@@ -316,8 +316,8 @@ const AttendanceManagement = () => {
           };
 
           const head = worksheet.addRow([
-            "№",
-            "O'QUVCHI F.I.SH",
+            "в„–",
+            "OʻQUVCHI F.I.SH",
             "TELEFON",
             "HOLATI",
             "IZOH",
@@ -392,10 +392,10 @@ const AttendanceManagement = () => {
   };
 
   const handleDelete = async (id) => {
-    if (window.confirm(t("Ushbu davomatni o'chirib tashlamoqchimisiz?"))) {
+    if (window.confirm(t("Ushbu davomatni oʻchirib tashlamoqchimisiz'"))) {
       try {
         await deleteDoc(doc(db, "attendance", id));
-        toast.success(t("Muvaffaqiyatli o'chirildi"));
+        toast.success(t("Muvaffaqiyatli oʻchirildi"));
       } catch (e) {
         toast.error(t("Xatolik yuz berdi"));
       }
@@ -415,8 +415,8 @@ const AttendanceManagement = () => {
 
   return (
     <div
-      className={`min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 transition-all duration-500 ${
-        isDark ? "bg-[#0f172a] text-white" : "bg-slate-50 text-slate-800"
+      className={`section-muted-bg min-h-screen p-3 sm:p-4 md:p-6 lg:p-8 transition-all duration-500 ${
+        isDark ? "text-white" : "text-slate-800"
       }`}
     >
       <div className="max-w-7xl mx-auto space-y-4 sm:space-y-6 lg:space-y-8">
@@ -668,9 +668,10 @@ const AttendanceManagement = () => {
                 data={group.attendance || []}
                 autoHeight
                 rowHeight={70}
-                className="!bg-transparent"
+                className="!bg-transparent w-full"
+                style={{ width: "100%" }}
               >
-                <Table.Column width={200}>
+                <Table.Column flexGrow={3} minWidth={260}>
                   <Table.HeaderCell className="font-black text-[8px] sm:text-[10px] uppercase">
                     {t("Student")}
                   </Table.HeaderCell>
@@ -693,7 +694,7 @@ const AttendanceManagement = () => {
                     )}
                   </Table.Cell>
                 </Table.Column>
-                <Table.Column width={150} align="right">
+                <Table.Column flexGrow={2} minWidth={180} align="right">
                   <Table.HeaderCell className="font-black text-[8px] sm:text-[10px] uppercase">
                     {t("Status")}
                   </Table.HeaderCell>

@@ -7,6 +7,7 @@ import {
   FiSave,
   FiUser,
   FiSend,
+  FiChevronDown,
 } from "react-icons/fi";
 import { useSelector, useDispatch } from "react-redux";
 import {
@@ -36,6 +37,9 @@ const HolidayModal = ({
   const [loading, setLoading] = useState(false);
   const [groupStudents, setGroupStudents] = useState([]);
   const [sendNotification, setSendNotification] = useState(true);
+
+  // Custom Select uchun ochiq/yopiq holati
+  const [isSelectOpen, setIsSelectOpen] = useState(false);
 
   const theme = useSelector((state) => state.theme.value);
 
@@ -76,7 +80,7 @@ const HolidayModal = ({
       return;
     }
     if (new Date(startDate) > new Date(endDate)) {
-      toast.error("Tugash sanasi boshlanish sanasidan keyin bo'lishi kerak!");
+      toast.error("Tugash sanasi boshlanish sanasidan keyin boʻlishi kerak!");
       return;
     }
 
@@ -97,10 +101,7 @@ const HolidayModal = ({
       };
 
       // Tatilni saqlash
-      const docRef = await addDoc(collection(db, "holidays"), holidayData);
-
-      // Birinchi toast - Tatil belgilandi
-      toast.success("Tatil muvaffaqiyatli belgilandi!");
+      await addDoc(collection(db, "holidays"), holidayData);
 
       // Bildirishnoma yaratish (navbar uchun)
       const notification = {
@@ -130,7 +131,7 @@ const HolidayModal = ({
           const startDateFormatted = formatDateToUzbek(startDate);
           const endDateFormatted = formatDateToUzbek(endDate);
 
-          const message = `🏖 <b>TATIL BOSHLANDI</b>\n\n📚 Guruh: <b>${selectedGroup?.groupName}</b>\n📅 Tatil: <b>${startDateFormatted} — ${endDateFormatted}</b>\n📝 Izoh: <i>${description || "Dam olish kuni"}</i>\n\n✨ Tatil muddati davomida darslar bo'lmaydi.\n🔔 Tatil tugagach yana xabar beramiz.`;
+          const message = `рџЏ– <b>TATIL BOSHLANDI</b>\n\nрџ“љ Guruh: <b>${selectedGroup?.groupName}</b>\nрџ“… Tatil: <b>${startDateFormatted} вЂ” ${endDateFormatted}</b>\nрџ“ќ Izoh: <i>${description || "Dam olish kuni"}</i>\n\nвњЁ Tatil muddati davomida darslar boʻlmaydi.\nрџ”” Tatil tugagach yana xabar beramiz.`;
 
           const notifications = studentsWithTelegram.map((s) => ({
             telegramId: s.telegramId,
@@ -146,18 +147,42 @@ const HolidayModal = ({
           console.log("Sending holiday notifications:", notifications);
 
           const result = await sendNotifications(notifications, {
-            showToast: false, // Toastni o'zi ko'rsatmaymiz, natijaga qarab ko'rsatamiz
+            showToast: false, // Toastni oʻzi koʻrsatmaymiz, natijaga qarab koʻrsatamiz
           });
 
           console.log("Notification result:", result);
 
           if (result.success) {
-            // Ikkinchi toast - Xabar yuborildi
             toast.success(
               <div>
-                <div className="font-bold">Xabar yuborildi</div>
+                <div className="font-bold">Tatil belgilandi</div>
                 <div className="text-xs opacity-80 mt-1">
-                  {result.deliveredCount} ta o'quvchiga tatil xabari yuborildi
+                  {result.deliveredCount || 0} ta studentga xabar yuborildi
+                </div>
+                {(result.failedCount || 0) > 0 && (
+                  <div className="text-xs opacity-80 mt-1 text-amber-500">
+                    {result.failedCount} ta studentga xabar yuborilmadi
+                  </div>
+                )}
+              </div>,
+              {
+                position: "top-right",
+                autoClose: 5000,
+                hideProgressBar: false,
+                closeOnClick: true,
+                pauseOnHover: true,
+                draggable: true,
+              },
+            );
+          } else {
+            toast.error(
+              <div>
+                <div className="font-bold">Tatil belgilandi</div>
+                <div className="text-xs opacity-80 mt-1">
+                  0 ta studentga xabar yuborildi
+                </div>
+                <div className="text-xs opacity-80 mt-1 text-red-400">
+                  {studentsWithTelegram.length} ta studentga xabar yuborilmadi
                 </div>
               </div>,
               {
@@ -167,36 +192,16 @@ const HolidayModal = ({
                 closeOnClick: true,
                 pauseOnHover: true,
                 draggable: true,
-                // theme: "colored",
-              },
-            );
-          } else {
-            // Ikkinchi toast - Xabar yuborilmadi
-            toast.error(
-              <div>
-                <div className="font-bold">Xabar yuborilmadi</div>
-                <div className="text-xs opacity-80 mt-1">
-                  {result.error === "Connection failed"
-                    ? "Backend serverga ulanib bo'lmadi. Server ishga tushganligini tekshiring."
-                    : "Xabar yuborishda xatolik yuz berdi."}
-                </div>
-              </div>,
-              {
-                position: "top-right",
-                autoClose: 7000,
-                hideProgressBar: false,
-                closeOnClick: true,
-                pauseOnHover: true,
-                draggable: true,
-                // theme: "colored",
               },
             );
           }
         } else {
-          toast.info("Telegram ID'ga ega o'quvchilar yo'q");
+          toast.info("Tatil belgilandi. Telegram ID'ga ega studentlar yoʻq");
         }
       } else if (sendNotification && groupStudents.length === 0) {
-        toast.info("Guruhda o'quvchilar yo'q");
+        toast.info("Tatil belgilandi. Guruhda studentlar yoʻq");
+      } else {
+        toast.success("Tatil belgilandi");
       }
 
       // Formani tozalash
@@ -216,14 +221,17 @@ const HolidayModal = ({
 
   const today = new Date().toISOString().split("T")[0];
 
+  // Ekranda guruh nomini koʻrsatish uchun tanlangan guruhni topamiz
+  const currentSelectedGroup = groups.find((g) => g.id === selectedGroupId);
+
   return (
-    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-50 p-4">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-md flex items-center justify-center z-[100] p-4">
       <div
-        className={`${theme === "light" ? "bg-white" : "bg-slate-800"} rounded-[40px] w-full max-w-lg shadow-2xl animate-in zoom-in duration-200 overflow-hidden relative`}
+        className={`${theme === "light" ? "bg-white" : "bg-slate-800"} rounded-[40px] w-full max-w-lg shadow-2xl animate-in zoom-in duration-200 overflow-visible relative`}
       >
         {/* HEADER */}
         <div
-          className={`${theme === "light" ? "bg-purple-50 border-b border-purple-100" : "bg-purple-900/20 border-b border-purple-800/30"} px-8 py-6 flex justify-between items-center`}
+          className={`${theme === "light" ? "bg-purple-50 border-b border-purple-100" : "bg-purple-900/20 border-b border-purple-800/30"} px-8 py-6 flex justify-between items-center rounded-t-[40px]`}
         >
           <div>
             <h3
@@ -245,28 +253,93 @@ const HolidayModal = ({
 
         {/* BODY */}
         <div className="p-8 space-y-6">
-          {/* Group Select */}
-          <div className="space-y-2">
+          {/* Custom Group Select */}
+          <div className="space-y-2 relative">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-wider ml-1 flex items-center gap-1">
               <FiUser size={12} />
               GURUHNI TANLANG
             </label>
-            <select
-              value={selectedGroupId}
-              onChange={(e) => setSelectedGroupId(e.target.value)}
-              className={`${theme === "light" ? "bg-slate-50 focus:bg-white text-slate-700" : "bg-slate-700/50 text-slate-300"} w-full border-2 border-transparent focus:border-purple-500 rounded-2xl py-4 px-4 font-bold outline-none transition-all cursor-pointer`}
-            >
-              <option value="">Tanlang...</option>
-              {groups.map((g) => (
-                <option key={g.id} value={g.id}>
-                  {g.groupName} (
-                  {Array.isArray(g.days)
-                    ? g.days.join(", ")
-                    : g.days || "Every day"}
-                  )
-                </option>
-              ))}
-            </select>
+
+            <div className="relative">
+              {/* Select Tugmasi */}
+              <div
+                onClick={() => setIsSelectOpen(!isSelectOpen)}
+                className={`${
+                  theme === "light"
+                    ? "bg-slate-50 hover:bg-slate-100 text-slate-700"
+                    : "bg-slate-700/50 hover:bg-slate-700 text-slate-300"
+                } w-full border-2 ${isSelectOpen ? "border-purple-500" : "border-transparent"} rounded-2xl py-0 px-4 font-bold outline-none transition-all cursor-pointer h-14 flex items-center justify-between`}
+              >
+                <span className="truncate">
+                  {currentSelectedGroup
+                    ? `${currentSelectedGroup.groupName} (${
+                        Array.isArray(currentSelectedGroup.days)
+                          ? currentSelectedGroup.days.join(", ")
+                          : currentSelectedGroup.days || "Every day"
+                      })`
+                    : "Tanlang..."}
+                </span>
+                <FiChevronDown
+                  className={`transition-transform duration-200 ${
+                    isSelectOpen
+                      ? "rotate-180 text-purple-500"
+                      : "text-slate-400"
+                  }`}
+                />
+              </div>
+
+              {/* Ochiladigan roʻyxat (Scroll bilan) */}
+              {isSelectOpen && (
+                <div
+                  className={`${
+                    theme === "light"
+                      ? "bg-white text-slate-700 border-slate-100 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.1)]"
+                      : "bg-slate-800 text-slate-300 border-slate-700 shadow-[0_10px_40px_-10px_rgba(0,0,0,0.5)]"
+                  } absolute top-[calc(100%+8px)] left-0 w-full rounded-2xl border z-50 max-h-[240px] overflow-y-auto custom-scrollbar`}
+                >
+                  <div
+                    onClick={() => {
+                      setSelectedGroupId("");
+                      setIsSelectOpen(false);
+                    }}
+                    className={`px-4 py-3 cursor-pointer transition-colors ${
+                      theme === "light"
+                        ? "hover:bg-purple-50 hover:text-purple-600 border-b border-slate-50"
+                        : "hover:bg-slate-700 hover:text-purple-300 border-b border-slate-700/50"
+                    }`}
+                  >
+                    Tanlang...
+                  </div>
+
+                  {groups.map((g) => (
+                    <div
+                      key={g.id}
+                      onClick={() => {
+                        setSelectedGroupId(g.id);
+                        setIsSelectOpen(false);
+                      }}
+                      className={`px-4 py-3 cursor-pointer transition-colors ${
+                        selectedGroupId === g.id
+                          ? theme === "light"
+                            ? "bg-purple-100 text-purple-700"
+                            : "bg-purple-900/40 text-purple-300"
+                          : ""
+                      } ${
+                        theme === "light"
+                          ? "hover:bg-purple-50 hover:text-purple-600 border-b border-slate-50 last:border-0"
+                          : "hover:bg-slate-700 hover:text-purple-300 border-b border-slate-700/50 last:border-0"
+                      }`}
+                    >
+                      {g.groupName} (
+                      {Array.isArray(g.days)
+                        ? g.days.join(", ")
+                        : g.days || "Every day"}
+                      )
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Date Range */}
@@ -312,7 +385,7 @@ const HolidayModal = ({
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Masalan: Navro'z bayrami, Yangi yil ta'tili..."
+              placeholder="Masalan: Navroʻz bayrami, Yangi yil ta'tili..."
               rows={2}
               className={`${theme === "light" ? "bg-slate-50 focus:bg-white" : "bg-slate-700"} w-full border-2 border-transparent focus:border-purple-500 rounded-2xl p-4 font-medium outline-none transition-all resize-none`}
             />
@@ -320,18 +393,20 @@ const HolidayModal = ({
 
           {/* Notification Toggle */}
           <div className="flex items-center gap-3">
-            <input
-              type="checkbox"
-              id="sendNotification"
-              checked={sendNotification}
-              onChange={(e) => setSendNotification(e.target.checked)}
-              className="w-5 h-5 rounded text-purple-600"
-            />
+            <div className="relative flex items-center">
+              <input
+                type="checkbox"
+                id="sendNotification"
+                checked={sendNotification}
+                onChange={(e) => setSendNotification(e.target.checked)}
+                className="w-5 h-5 rounded text-purple-600 cursor-pointer accent-purple-600"
+              />
+            </div>
             <label
               htmlFor="sendNotification"
-              className="text-sm font-medium text-slate-400 flex items-center gap-1"
+              className="text-sm font-medium text-slate-400 flex items-center gap-1 cursor-pointer"
             >
-              <FiSend /> O'quvchilarga xabar yuborish
+              <FiSend /> Oʻquvchilarga xabar yuborish
             </label>
           </div>
 
@@ -347,16 +422,17 @@ const HolidayModal = ({
                     theme === "light" ? "text-purple-800" : "text-purple-300"
                   }
                 >
-                  {formatDateToUzbek(startDate)} — {formatDateToUzbek(endDate)}
+                  {formatDateToUzbek(startDate)} вЂ”{" "}
+                  {formatDateToUzbek(endDate)}
                 </span>
               </p>
               <p className="text-xs text-slate-400 mt-1">
-                Bu kunlarda dars o'tilmaydi va to'lov muddati uzaytiriladi
+                Bu kunlarda dars oʻtilmaydi va toʻlov muddati uzaytiriladi
               </p>
               {groupStudents.length > 0 && (
                 <p className="text-xs text-green-500 mt-2">
-                  📱 {groupStudents.filter((s) => s.telegramId).length} ta
-                  o'quvchiga xabar boradi
+                  рџ“± {groupStudents.filter((s) => s.telegramId).length} ta
+                  oʻquvchiga xabar boradi
                 </p>
               )}
             </div>
@@ -365,7 +441,7 @@ const HolidayModal = ({
 
         {/* FOOTER */}
         <div
-          className={`px-8 py-6 ${theme === "light" ? "bg-slate-50 border-t border-slate-100" : "bg-slate-800/50 border-t border-slate-700"} flex gap-3`}
+          className={`px-8 py-6 ${theme === "light" ? "bg-slate-50 border-t border-slate-100" : "bg-slate-800/50 border-t border-slate-700"} flex gap-3 rounded-b-[40px]`}
         >
           <button
             onClick={() => setShowModal(false)}

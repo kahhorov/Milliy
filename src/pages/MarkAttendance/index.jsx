@@ -19,7 +19,17 @@ import {
   Timestamp,
 } from "firebase/firestore";
 import { db } from "../../firebase/firebase";
-import { FaCalendarDay, FaCheck, FaTimes, FaRedo } from "react-icons/fa";
+import { sendNotifications } from "../../utils/sendNotification";
+import {
+  FaCalendarDay,
+  FaCheck,
+  FaTimes,
+  FaRedo,
+  FaPhoneAlt,
+  FaUserGraduate,
+  FaBook,
+  FaExclamationCircle,
+} from "react-icons/fa";
 import { MdSave, MdEventBusy, MdEventAvailable } from "react-icons/md";
 import { TbClockHour4 } from "react-icons/tb";
 import { FaPeopleGroup } from "react-icons/fa6";
@@ -53,6 +63,13 @@ function MarkAttendance() {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [activeStudentId, setActiveStudentId] = useState(null);
   const [delayMinute, setDelayMinute] = useState(5); // Default 5 daqiqa
+  const [isExcusedModalOpen, setIsExcusedModalOpen] = useState(false);
+  const [excusedReason, setExcusedReason] = useState("");
+  const [reasonModalState, setReasonModalState] = useState({
+    open: false,
+    studentName: "",
+    reason: "",
+  });
   const [isAlreadyMarked, setIsAlreadyMarked] = useState(false);
   const [loading, setLoading] = useState(false);
   const [isDirty, setIsDirty] = useState(false);
@@ -66,17 +83,17 @@ function MarkAttendance() {
       value: item.id,
     })) || [];
 
-  // --- LOGIKA: BUGUN DARS BORMI? ---
+  // --- LOGIKA: BUGUN DARS BORMI' ---
   const isLessonDay = useMemo(() => {
     if (!selectedGroupData || !selectedGroupData.days) return false;
 
-    const groupDays = selectedGroupData.days; // Array yoki String bo'lishi mumkin
+    const groupDays = selectedGroupData.days; // Array yoki String boʻlishi mumkin
 
-    // Agar "Every day" bo'lsa (Yakshanbadan tashqari har kuni)
+    // Agar "Every day" boʻlsa (Yakshanbadan tashqari har kuni)
     if (Array.isArray(groupDays) && groupDays.includes("Every day")) {
       return selectedDay !== "Sunday";
     }
-    // Ba'zan ma'lumot string ko'rinishida kelishi mumkin, shuni ham inobatga olamiz
+    // Ba'zan ma'lumot string koʻrinishida kelishi mumkin, shuni ham inobatga olamiz
     if (typeof groupDays === "string" && groupDays === "Every day") {
       return selectedDay !== "Sunday";
     }
@@ -90,7 +107,8 @@ function MarkAttendance() {
       (student) =>
         student.status === "present" ||
         student.status === "absent" ||
-        student.status === "late",
+        student.status === "late" ||
+        student.status === "excused",
     );
   };
 
@@ -99,8 +117,8 @@ function MarkAttendance() {
       const group = groups.find((g) => g.id === selectedGroupId);
       if (group) {
         setSelectedGroupData(group);
-        // Faqat dars kuni bo'lsa studentlarni yuklaymiz
-        // Lekin React hook qoidalariga ko'ra bu yerda tekshirish qiyin,
+        // Faqat dars kuni boʻlsa studentlarni yuklaymiz
+        // Lekin React hook qoidalariga koʻra bu yerda tekshirish qiyin,
         // shuning uchun checkAttendanceAndFetchStudents ichida tekshiramiz yoki UI da bloklaymiz.
         // UI bloklash afzalroq, lekin ma'lumotni baribir olib kelamiz.
         checkAttendanceAndFetchStudents(group);
@@ -111,7 +129,7 @@ function MarkAttendance() {
   const checkAttendanceAndFetchStudents = async (currentGroup) => {
     setLoading(true);
     try {
-      // Bugungi sana bo'yicha davomat borligini tekshirish
+      // Bugungi sana boʻyicha davomat borligini tekshirish
       const attQuery = query(
         collection(db, "attendance"),
         where("groupId", "==", currentGroup.id),
@@ -139,6 +157,7 @@ function MarkAttendance() {
             ...doc.data(),
             status: "pending",
             delay: null,
+            absentReason: "",
           })),
         );
       }
@@ -169,10 +188,16 @@ function MarkAttendance() {
     if (status === "late") {
       setActiveStudentId(id);
       setIsModalOpen(true);
+    } else if (status === "excused") {
+      setActiveStudentId(id);
+      setExcusedReason("");
+      setIsExcusedModalOpen(true);
     } else {
       setIsDirty(true);
       setStudents((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, status, delay: null } : s)),
+        prev.map((s) =>
+          s.id === id ? { ...s, status, delay: null, absentReason: "" } : s,
+        ),
       );
     }
   };
@@ -188,6 +213,30 @@ function MarkAttendance() {
     );
     setIsModalOpen(false);
     setDelayMinute(5);
+  };
+
+  const handleExcusedSubmit = () => {
+    const trimmedReason = String(excusedReason || "").trim();
+    if (!trimmedReason) {
+      toast.warning(t("markAttendance.enterReason"));
+      return;
+    }
+
+    setIsDirty(true);
+    setStudents((prev) =>
+      prev.map((s) =>
+        s.id === activeStudentId
+          ? {
+              ...s,
+              status: "excused",
+              delay: null,
+              absentReason: trimmedReason,
+            }
+          : s,
+      ),
+    );
+    setIsExcusedModalOpen(false);
+    setExcusedReason("");
   };
 
   const handleSaveAttendance = async () => {
@@ -225,10 +274,64 @@ function MarkAttendance() {
         presentCount: students.filter((s) => s.status === "present").length,
         absentCount: students.filter((s) => s.status === "absent").length,
         lateCount: students.filter((s) => s.status === "late").length,
+        excusedCount: students.filter((s) => s.status === "excused").length,
         attendance: students,
       };
 
       await addDoc(collection(db, "attendance"), attendanceData);
+
+      const absentStudents = students.filter(
+        (s) => s.status === "absent" && s.telegramId,
+      );
+
+      if (absentStudents.length > 0) {
+        const notifications = absentStudents.map((student) => {
+          const fullName =
+            `${student.studentName || ""} ${student.lastName || ""}`.trim() ||
+            t("Student");
+
+          return {
+            telegramId: student.telegramId,
+            studentName: fullName,
+            studentId: student.id,
+            groupId: selectedGroupId,
+            groupName: selectedGroupData?.groupName || "",
+            notificationType: "attendance_absent",
+            message: `Assalomu alaykum ${fullName} bugun darsga qatnashmadingiz biror sababi bolsa markazimizga kelib tushuntrish bering`,
+          };
+        });
+
+        const result = await sendNotifications(notifications, {
+          showToast: false,
+        });
+
+        if (result.success) {
+          toast.success(
+            <div>
+              <div className="font-bold">Xabar yuborildi</div>
+              <div className="text-xs opacity-80 mt-1">
+                {result.deliveredCount || 0} ta kelmagan studentga xabar
+                yuborildi
+              </div>
+              {(result.failedCount || 0) > 0 && (
+                <div className="text-xs opacity-80 mt-1 text-amber-500">
+                  {result.failedCount} ta studentga xabar yuborilmadi
+                </div>
+              )}
+            </div>,
+          );
+        } else {
+          toast.error(
+            <div>
+              <div className="font-bold">Xabar yuborilmadi</div>
+              <div className="text-xs opacity-80 mt-1">
+                {absentStudents.length} ta studentga yuborishda xatolik
+              </div>
+            </div>,
+          );
+        }
+      }
+
       toast.success(t("Attendance saved successfully!"));
       setIsAlreadyMarked(true);
       setIsDirty(false);
@@ -274,6 +377,15 @@ function MarkAttendance() {
               : "rgba(245, 158, 11, 0.04)",
           borderLeftColor: "#f59e0b",
         };
+      case "excused":
+        return {
+          ...baseStyle,
+          backgroundColor:
+            theme === "dark"
+              ? "rgba(59, 130, 246, 0.08)"
+              : "rgba(59, 130, 246, 0.04)",
+          borderLeftColor: "#3b82f6",
+        };
       default:
         return {
           ...baseStyle,
@@ -305,7 +417,7 @@ function MarkAttendance() {
     const isActive = rowStatus === status;
 
     const getButtonClass = () => {
-      // Asosiy klasslar: Badge ko'rinishi, rounded, font-medium
+      // Asosiy klasslar: Badge koʻrinishi, rounded, font-medium
       const baseClass =
         "px-4 py-2 rounded-xl text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 border transform active:scale-95";
 
@@ -318,6 +430,8 @@ function MarkAttendance() {
             return `${baseClass} bg-rose-500 hover:bg-rose-600 border-rose-500 text-white shadow-md shadow-rose-500/20`;
           case "late":
             return `${baseClass} bg-amber-500 hover:bg-amber-600 border-amber-500 text-white shadow-md shadow-amber-500/20`;
+          case "excused":
+            return `${baseClass} bg-blue-500 hover:bg-blue-600 border-blue-500 text-white shadow-md shadow-blue-500/20`;
           default:
             return baseClass;
         }
@@ -335,6 +449,8 @@ function MarkAttendance() {
           return `${baseClass} bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-100 dark:border-rose-500/20 hover:bg-rose-100 dark:hover:bg-rose-500/20`;
         case "late":
           return `${baseClass} bg-amber-50 dark:bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-100 dark:border-amber-500/20 hover:bg-amber-100 dark:hover:bg-amber-500/20`;
+        case "excused":
+          return `${baseClass} bg-blue-50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-100 dark:border-blue-500/20 hover:bg-blue-100 dark:hover:bg-blue-500/20`;
         default:
           return baseClass;
       }
@@ -500,7 +616,7 @@ function MarkAttendance() {
               </div>
             </div>
 
-            {/* --- AGAR BUGUN DARS KUNI BO'LMASA --- */}
+            {/* --- AGAR BUGUN DARS KUNI BOʻLMASA --- */}
             {!isLessonDay ? (
               <div
                 className={`flex flex-col items-center justify-center p-12 rounded-2xl border-2 border-dashed ${theme === "dark" ? "bg-slate-900/50 border-slate-700" : "bg-slate-50 border-slate-200"}`}
@@ -524,7 +640,7 @@ function MarkAttendance() {
                   {t("Check the group schedule.")}
                 </p>
 
-                {/* Guruh kunlarini ko'rsatish */}
+                {/* Guruh kunlarini koʻrsatish */}
                 <div className="mt-6 flex flex-wrap gap-2 justify-center">
                   <span
                     className={`text-xs px-2 py-1 rounded ${theme === "dark" ? "text-slate-500" : "text-slate-400"}`}
@@ -554,7 +670,7 @@ function MarkAttendance() {
                 </div>
               </div>
             ) : (
-              /* --- AGAR DARS KUNI BO'LSA, DAVOMAT JADVALI CHIQADI --- */
+              /* --- AGAR DARS KUNI BOʻLSA, DAVOMAT JADVALI CHIQADI --- */
               <>
                 {isAlreadyMarked && (
                   <div
@@ -605,6 +721,17 @@ function MarkAttendance() {
                             {t("Absent")}
                           </div>
                         </div>
+                        <div className="text-center">
+                          <div className="text-xl font-bold text-blue-600 dark:text-blue-400">
+                            {
+                              students.filter((s) => s.status === "excused")
+                                .length
+                            }
+                          </div>
+                          <div className="text-[8px] md:text-xs font-medium text-blue-500 dark:text-blue-500 uppercase tracking-wide">
+                            {t("Excused")}
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -618,7 +745,7 @@ function MarkAttendance() {
                     autoHeight
                     data={students}
                     loading={loading}
-                    rowHeight={75}
+                    rowHeight={112}
                     rowStyle={(rowData) => getStudentRowStyle(rowData.status)}
                     headerHeight={60}
                     className="attendance-table"
@@ -654,16 +781,45 @@ function MarkAttendance() {
                             >
                               {rowData.studentName} {rowData.lastName}
                             </div>
-                            <div className="text-xs text-slate-500 dark:text-slate-400 mt-1 flex items-center gap-1">
-                              <span className="opacity-70">📞</span> +998{" "}
-                              {rowData.phoneNumber || t("No phone number")}
+                            <div className="mt-1 flex items-center gap-2 flex-wrap text-xs text-slate-500 dark:text-slate-400">
+                              {rowData.status === "excused" && (
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setReasonModalState({
+                                      open: true,
+                                      studentName:
+                                        `${rowData.studentName || ""} ${rowData.lastName || ""}`.trim(),
+                                      reason:
+                                        rowData.absentReason ||
+                                        t("markAttendance.noReason"),
+                                    })
+                                  }
+                                  className="inline-flex items-center gap-1 rounded-full bg-blue-500/15 text-blue-500 px-2.5 py-0.5 text-[11px] font-semibold hover:bg-blue-500/25 transition-colors"
+                                >
+                                  <FaExclamationCircle className="text-[10px]" />
+                                  {t("Excused")}
+                                </button>
+                              )}
+                              <span className="inline-flex items-center gap-1">
+                                <FaPhoneAlt className="opacity-70 text-[10px] flex-shrink-0" />
+                                <span className="break-all">
+                                  {rowData.phoneNumber
+                                    ? String(rowData.phoneNumber).startsWith(
+                                        "+",
+                                      )
+                                      ? rowData.phoneNumber
+                                      : `+998 ${rowData.phoneNumber}`
+                                    : t("No phone number")}
+                                </span>
+                              </span>
                             </div>
                           </div>
                         )}
                       </Cell>
                     </Column>
 
-                    <Column width={500} align="center" verticalAlign="middle">
+                    <Column width={640} align="center" verticalAlign="middle">
                       <HeaderCell
                         className={`font-semibold ${theme === "dark" ? "text-slate-300" : "text-slate-700"}`}
                       >
@@ -675,7 +831,7 @@ function MarkAttendance() {
                             rowData.status !== "pending";
 
                           return (
-                            <div className="flex items-center justify-center gap-3 w-full">
+                            <div className="flex items-center justify-center gap-2 w-full flex-wrap">
                               {/* Keldi */}
                               <ActionButton
                                 icon={FaCheck}
@@ -716,6 +872,19 @@ function MarkAttendance() {
                                 }
                               />
 
+                              <ActionButton
+                                icon={FaExclamationCircle}
+                                label={t("Excused")}
+                                status="excused"
+                                rowStatus={rowData.status}
+                                onClick={() =>
+                                  updateStatus(rowData.id, "excused")
+                                }
+                                disabled={
+                                  isAlreadyMarked || isAnyStatusSelected
+                                }
+                              />
+
                               {/* Reset */}
                               {isAnyStatusSelected && !isAlreadyMarked && (
                                 <button
@@ -728,6 +897,7 @@ function MarkAttendance() {
                                               ...s,
                                               status: "pending",
                                               delay: null,
+                                              absentReason: "",
                                             }
                                           : s,
                                       ),
@@ -752,7 +922,9 @@ function MarkAttendance() {
 
                   {students.length === 0 && !loading && (
                     <div className="flex flex-col items-center justify-center py-16">
-                      <div className="text-4xl mb-3">👨‍🎓</div>
+                      <div className="text-4xl mb-3">
+                        <FaUserGraduate />
+                      </div>
                       <p
                         className={`text-sm font-medium ${theme === "dark" ? "text-slate-400" : "text-slate-600"}`}
                       >
@@ -771,7 +943,7 @@ function MarkAttendance() {
             <div
               className={`w-20 h-20 rounded-full flex items-center justify-center text-3xl mb-4 ${theme === "dark" ? "bg-slate-800" : "bg-slate-100"}`}
             >
-              📚
+              <FaBook />
             </div>
             <h3
               className={`text-lg font-bold mb-2 ${theme === "dark" ? "text-slate-300" : "text-slate-700"}`}
@@ -806,7 +978,7 @@ function MarkAttendance() {
                 <div>
                   <div className="font-bold">{t("Delay time")}</div>
                   <div className="text-xs text-slate-500 dark:text-slate-400 font-normal">
-                    {t("How many minutes was the student late?")}
+                    {t("How many minutes was the student late'")}
                   </div>
                 </div>
               </div>
@@ -861,6 +1033,108 @@ function MarkAttendance() {
               className="px-6 font-semibold"
             >
               {t("Confirmation")}
+            </Button>
+          </Modal.Footer>
+        </Modal>
+
+        <Modal
+          open={isExcusedModalOpen}
+          onClose={() => setIsExcusedModalOpen(false)}
+          size="xs"
+          backdrop="static"
+        >
+          <Modal.Header>
+            <Modal.Title
+              className={`font-medium ${theme === "dark" ? "text-white" : "text-slate-900"}`}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className={`p-2 rounded-lg ${theme === "dark" ? "bg-blue-900/40" : "bg-blue-100"}`}
+                >
+                  <FaExclamationCircle className="text-blue-600 dark:text-blue-400 text-lg" />
+                </div>
+                <div>
+                  <div className="font-bold">{t("Excused")}</div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400 font-normal">
+                    {t("markAttendance.enterReasonLabel")}
+                  </div>
+                </div>
+              </div>
+            </Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <textarea
+              value={excusedReason}
+              onChange={(e) => setExcusedReason(e.target.value)}
+              placeholder={t("markAttendance.reasonPlaceholder")}
+              className={`w-full min-h-[120px] rounded-xl border px-3 py-2 outline-none resize-none ${
+                theme === "dark"
+                  ? "bg-slate-800 border-slate-700 text-slate-100 placeholder:text-slate-500"
+                  : "bg-white border-slate-300 text-slate-800 placeholder:text-slate-400"
+              }`}
+            />
+          </Modal.Body>
+          <Modal.Footer>
+            <Button
+              onClick={() => setIsExcusedModalOpen(false)}
+              appearance="subtle"
+              className="mr-2"
+            >
+              {t("Cancel")}
+            </Button>
+            <Button
+              onClick={handleExcusedSubmit}
+              appearance="primary"
+              color="blue"
+              className="px-6 font-semibold"
+            >
+              {t("Save")}
+            </Button>
+          </Modal.Footer>
+        </Modal>
+
+        <Modal
+          open={reasonModalState.open}
+          onClose={() =>
+            setReasonModalState((prev) => ({
+              ...prev,
+              open: false,
+            }))
+          }
+          size="xs"
+        >
+          <Modal.Header>
+            <Modal.Title>{t("markAttendance.reasonModalTitle")}</Modal.Title>
+          </Modal.Header>
+          <Modal.Body>
+            <p
+              className={`text-sm mb-3 ${theme === "dark" ? "text-slate-300" : "text-slate-700"}`}
+            >
+              <span className="font-semibold">
+                {reasonModalState.studentName}
+              </span>
+            </p>
+            <div
+              className={`rounded-xl border p-3 text-sm ${
+                theme === "dark"
+                  ? "bg-slate-800 border-slate-700 text-slate-200"
+                  : "bg-slate-50 border-slate-200 text-slate-700"
+              }`}
+            >
+              {reasonModalState.reason}
+            </div>
+          </Modal.Body>
+          <Modal.Footer>
+            <Button
+              onClick={() =>
+                setReasonModalState((prev) => ({
+                  ...prev,
+                  open: false,
+                }))
+              }
+              appearance="primary"
+            >
+              {t("Close")}
             </Button>
           </Modal.Footer>
         </Modal>

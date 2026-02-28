@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import { useTranslation } from "react-i18next";
 import { FiX, FiDollarSign, FiClock } from "react-icons/fi";
 import { useSelector } from "react-redux";
 import { PiStudent } from "react-icons/pi";
@@ -14,10 +15,10 @@ const formatMoney = (num) => {
   return cleanNum.replace(/\B(?=(\d{3})+(?!\d))/g, ".");
 };
 
-// Stringdagi pulni haqiqiy songa o'tkazish (masalan: "250.000" -> 250000)
+// Stringdagi pulni haqiqiy songa oʻtkazish (masalan: "250.000" -> 250000)
 const parseMoney = (str) => {
   if (!str) return 0;
-  // NUQTALARNI OLIB TASHLAYMIZ va to'g'ridan-to'g'ri number ga aylantiramiz
+  // NUQTALARNI OLIB TASHLAYMIZ va toʻg'ridan-toʻg'ri number ga aylantiramiz
   // "2.500.000" -> "2500000" -> 2500000
   const cleanStr = str.toString().replace(/\./g, "");
   return parseInt(cleanStr, 10) || 0;
@@ -26,7 +27,7 @@ const parseMoney = (str) => {
 // Telegram uchun pul formati
 const formatMoneyForTelegram = (amountStr) => {
   const num = parseMoney(amountStr);
-  return `${formatMoney(num)} so'm`;
+  return `${formatMoney(num)} soʻm`;
 };
 
 const PaymentModal = ({
@@ -45,6 +46,7 @@ const PaymentModal = ({
   loading,
 }) => {
   if (!showModal || !selectedStudent) return null;
+  const { t } = useTranslation();
 
   const theme = useSelector((state) => state.theme.value);
   const { todayStr, formatUzbekDateReadable } = useUzbekTime();
@@ -61,8 +63,8 @@ const PaymentModal = ({
       const priceValue = selectedStudent.info.coursePrice || 0;
       let parsedPrice = parseMoney(priceValue);
 
-      // Agar bazada adashib "250" ko'rinishida kichik raqam saqlangan bo'lsa,
-      // uni avtomatik 1000 ga ko'paytirib olamiz (250 -> 250000)
+      // Agar bazada adashib "250" koʻrinishida kichik raqam saqlangan boʻlsa,
+      // uni avtomatik 1000 ga koʻpaytirib olamiz (250 -> 250000)
       if (parsedPrice > 0 && parsedPrice < 10000) {
         parsedPrice = parsedPrice * 1000;
       }
@@ -70,13 +72,13 @@ const PaymentModal = ({
     }
   }, [selectedStudent]);
 
-  // Qarzlar va to'lovlarni hisoblash
+  // Qarzlar va toʻlovlarni hisoblash
   useEffect(() => {
     if (selectedStudent && selectedStudent.info) {
       const totalDebt =
         selectedStudent.info.debts?.reduce((sum, debt) => {
           let dAmt = parseMoney(debt.debtAmount);
-          // Qarzlar ham kichik sonda kelgan bo'lsa to'g'irlaymiz
+          // Qarzlar ham kichik sonda kelgan boʻlsa toʻg'irlaymiz
           if (dAmt > 0 && dAmt < 10000) dAmt = dAmt * 1000;
           return sum + dAmt;
         }, 0) || 0;
@@ -95,7 +97,7 @@ const PaymentModal = ({
     if (showModal && selectedStudent) {
       if (paymentType === "regular") {
         if (coursePrice > 0) {
-          setAmount(formatMoney(coursePrice)); // "250.000" bo'lib saqlanadi
+          setAmount(formatMoney(coursePrice)); // "250.000" boʻlib saqlanadi
         }
       } else if (
         paymentType === "debt" &&
@@ -117,11 +119,11 @@ const PaymentModal = ({
     setAmount(formatted);
   };
 
-  // Inputdan focus chiqqanda (onBlur) 250 yozgan bo'lsa oxiriga .000 qo'shish
+  // Inputdan focus chiqqanda (onBlur) 250 yozgan boʻlsa oxiriga .000 qoʻshish
   const handleAmountBlur = () => {
     if (amount) {
       let rawNum = parseMoney(amount);
-      // Agar foydalanuvchi "250" yozib qoldirgan bo'lsa:
+      // Agar foydalanuvchi "250" yozib qoldirgan boʻlsa:
       if (rawNum > 0 && rawNum < 10000) {
         rawNum = rawNum * 1000;
       }
@@ -153,8 +155,8 @@ const PaymentModal = ({
   // Summani tekshirish (10.000.000 gacha)
   const validateAmount = (numAmount) => {
     if (numAmount > 10000000) {
-      // 10.000.000 dan katta bo'lsa
-      toast.error("Maksimal to'lov miqdori 10.000.000 so'm");
+      // 10.000.000 dan katta boʻlsa
+      toast.error(t("paymentModal.maxAmountError"));
       return false;
     }
     return true;
@@ -162,9 +164,19 @@ const PaymentModal = ({
 
   const handleSubmit = async () => {
     const numAmount = parseMoney(amount);
+    const hasDebts = (selectedStudent?.info?.debts || []).length > 0;
+
+    if (paymentType === "debt" && !hasDebts) {
+      toast.warning(
+        t("paymentModal.noDebtFound", {
+          defaultValue: "Qarz topilmadi. Joriy toʻlovni tanlang.",
+        }),
+      );
+      return;
+    }
 
     if (!numAmount || numAmount <= 0) {
-      toast.error("Summani kiriting!");
+      toast.error(t("payments.enterAmount"));
       return;
     }
 
@@ -174,22 +186,22 @@ const PaymentModal = ({
     }
 
     if (!paymentDate) {
-      toast.error("Sanani tanlang!");
+      toast.error(t("payments.selectDate"));
       return;
     }
 
     setSendingNotification(true);
 
     try {
-      // To'lov summasini saqlab qolamiz (keyin ishlatish uchun)
+      // Toʻlov summasini saqlab qolamiz (keyin ishlatish uchun)
       const paymentAmount = amount;
       const paymentAmountNum = numAmount;
 
-      // To'lovni saqlash uchun amount ni to'g'ri formatda yuborish
-      // amount = "2.500.000" bo'lsa, numAmount = 2500000 bo'ladi
+      // Toʻlovni saqlash uchun amount ni toʻg'ri formatda yuborish
+      // amount = "2.500.000" boʻlsa, numAmount = 2500000 boʻladi
       // handlePaymentSubmit ga numAmount ni yuboramiz
 
-      // To'lovni saqlash
+      // Toʻlovni saqlash
       await handlePaymentSubmit();
 
       // Telegram xabar yuborish uchun format
@@ -202,7 +214,16 @@ const PaymentModal = ({
         const studentLastName = selectedStudent.lastName || "";
         const formattedDate = formatUzbekDateReadable(paymentDate);
 
-        const message = `<b>✅ TO'LOV QABUL QILINDI</b>\n\n👤 ${studentName} ${studentLastName}\n💰 Summa: <b>${telegramAmount}</b>\n📅 Sana: <b>${formattedDate}</b>\n🏷 Tur: <b>${paymentType === "debt" ? "Qarz to'lovi" : "Joriy to'lov"}</b>\n\n✨ To'lovingiz uchun rahmat!`;
+        const message = [
+          `<b>✅ ${t("paymentModal.paymentAccepted")}</b>`,
+          "",
+          `👤 ${studentName} ${studentLastName}`,
+          `💰 ${t("Amount")}: <b>${telegramAmount}</b>`,
+          `📅 ${t("Date")}: <b>${formattedDate}</b>`,
+          `🏷 ${t("payments.type")}: <b>${paymentType === "debt" ? t("payments.debtPayment") : t("payments.currentPayment")}</b>`,
+          "",
+          `✨ ${t("paymentModal.thanks")}`,
+        ].join("\n");
 
         const result = await sendNotifications(
           [
@@ -221,18 +242,22 @@ const PaymentModal = ({
         if (result.success) {
           toast.success(
             <div>
-              <div className="font-bold">To'lov qabul qilindi</div>
+              <div className="font-bold">
+                {t("paymentModal.paymentAccepted")}
+              </div>
               <div className="text-xs opacity-80 mt-1">
-                {paymentAmount} so'm qabul qilindi va xabar yuborildi
+                {paymentAmount} soʻm {t("paymentModal.acceptedAndSent")}
               </div>
             </div>,
           );
         } else {
           toast.success(
             <div>
-              <div className="font-bold">To'lov qabul qilindi</div>
+              <div className="font-bold">
+                {t("paymentModal.paymentAccepted")}
+              </div>
               <div className="text-xs opacity-80 mt-1 text-orange-500">
-                {paymentAmount} so'm qabul qilindi, lekin xabar yuborilmadi
+                {paymentAmount} soʻm {t("paymentModal.acceptedNotSent")}
               </div>
             </div>,
           );
@@ -240,9 +265,9 @@ const PaymentModal = ({
       } else {
         toast.success(
           <div>
-            <div className="font-bold">To'lov qabul qilindi</div>
+            <div className="font-bold">{t("paymentModal.paymentAccepted")}</div>
             <div className="text-xs opacity-80 mt-1">
-              {paymentAmount} so'm qabul qilindi (Telegram ID yo'q)
+              {paymentAmount} soʻm {t("paymentModal.acceptedNoTelegram")}
             </div>
           </div>,
         );
@@ -252,7 +277,7 @@ const PaymentModal = ({
       setAmount("");
     } catch (error) {
       console.error("Payment error:", error);
-      toast.error("Xatolik yuz berdi");
+      toast.error(t("An error occurred"));
     } finally {
       setSendingNotification(false);
     }
@@ -298,7 +323,7 @@ const PaymentModal = ({
             <h3
               className={`${theme === "light" ? "text-slate-800" : "text-slate-300"} text-xl font-black`}
             >
-              To'lov Qabul Qilish
+              {t("paymentModal.title")}
             </h3>
             <p
               className={`${theme === "light" ? "text-slate-500" : "text-slate-400"} flex items-center gap-1 mt-1 text-sm font-bold`}
@@ -331,7 +356,7 @@ const PaymentModal = ({
                       theme === "light" ? "text-amber-600" : "text-amber-400"
                     }`}
                   >
-                    To'lov ma'lumotlari
+                    {t("paymentModal.paymentInfo")}
                   </span>
                 </div>
                 <div className="space-y-2">
@@ -341,14 +366,14 @@ const PaymentModal = ({
                         theme === "light" ? "text-gray-600" : "text-gray-400"
                       }
                     >
-                      Jami to'langan:
+                      {t("paymentModal.totalPaid")}:
                     </span>
                     <span
                       className={`font-bold ${
                         theme === "light" ? "text-green-600" : "text-green-400"
                       }`}
                     >
-                      {formatMoney(totalPaid)} so'm
+                      {formatMoney(totalPaid)} soʻm
                     </span>
                   </div>
                   {remainingDebt > 0 && (
@@ -358,10 +383,10 @@ const PaymentModal = ({
                           theme === "light" ? "text-gray-600" : "text-gray-400"
                         }
                       >
-                        Qolgan qarz:
+                        {t("paymentModal.remainingDebt")}:
                       </span>
                       <span className="font-bold text-red-500">
-                        {formatMoney(remainingDebt)} so'm
+                        {formatMoney(remainingDebt)} soʻm
                       </span>
                     </div>
                   )}
@@ -371,14 +396,14 @@ const PaymentModal = ({
                         theme === "light" ? "text-gray-600" : "text-gray-400"
                       }
                     >
-                      Kurs narxi:
+                      {t("paymentModal.coursePrice")}:
                     </span>
                     <span
                       className={`font-bold ${
                         theme === "light" ? "text-blue-600" : "text-blue-400"
                       }`}
                     >
-                      {formatMoney(coursePrice)} so'm
+                      {formatMoney(coursePrice)} soʻm
                     </span>
                   </div>
                 </div>
@@ -398,7 +423,7 @@ const PaymentModal = ({
                     : "text-slate-500 hover:text-slate-700"
                 }`}
               >
-                Qarzni Yopish
+                {t("paymentModal.closeDebt")}
               </button>
             )}
             <button
@@ -409,7 +434,9 @@ const PaymentModal = ({
                   : "text-slate-500 hover:text-slate-700"
               }`}
             >
-              Joriy To'lov ({formatMoney(coursePrice)} so'm)
+              {t("paymentModal.currentPayment", {
+                amount: `${formatMoney(coursePrice)} soʻm`,
+              })}
             </button>
           </div>
 
@@ -417,7 +444,7 @@ const PaymentModal = ({
             selectedStudent.info?.debts?.length > 0 && (
               <div className="space-y-3">
                 <label className="text-xs font-black text-slate-400 capitalize ml-1">
-                  Qarzni Tanlang
+                  {t("paymentModal.selectDebt")}
                 </label>
                 <div className="max-h-40 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
                   {selectedStudent.info.debts.map((debt, idx) => {
@@ -442,13 +469,13 @@ const PaymentModal = ({
                             {formatUzbekDateReadable(debt.endDate)}
                           </p>
                           <p className="text-[10px] text-red-400 font-medium">
-                            To'lanmagan sana
+                            {t("paymentModal.unpaidDate")}
                           </p>
                         </div>
                         <span
                           className={`${theme === "light" ? "text-slate-800" : "text-slate-200"} font-black`}
                         >
-                          {formatMoney(dAmt)} so'm
+                          {formatMoney(dAmt)} soʻm
                         </span>
                       </div>
                     );
@@ -460,13 +487,13 @@ const PaymentModal = ({
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div className="col-span-1 md:col-span-2">
               <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1">
-                Summa (so'm)
+                {t("paymentModal.amountSum")}
               </label>
               <div className="relative">
                 <FiDollarSign className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
                 <input
                   type="text"
-                  placeholder={`Masalan: 2.500.000`}
+                  placeholder={`${t("Amount placeholder", { defaultValue: "Masalan: 2.500.000" })}`}
                   value={amount}
                   onChange={handleAmountChange}
                   onBlur={handleAmountBlur}
@@ -476,10 +503,11 @@ const PaymentModal = ({
               <p className="text-xs text-slate-400 mt-1">
                 {amount && (
                   <span>
-                    Qiymat: {parseMoney(amount).toLocaleString()} so'm
+                    {t("paymentModal.value")}:{" "}
+                    {parseMoney(amount).toLocaleString()} soʻm
                     {parseMoney(amount) > 10000000 && (
                       <span className="text-red-500 ml-2">
-                        (10.000.000 dan oshib ketdi!)
+                        ({t("paymentModal.exceedsMax")})
                       </span>
                     )}
                   </span>
@@ -488,7 +516,7 @@ const PaymentModal = ({
             </div>
             <div className="col-span-1 md:col-span-2">
               <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1">
-                To'lov Sanasi
+                {t("paymentModal.paymentDate")}
               </label>
               <div className="relative">
                 <FiClock className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
@@ -517,19 +545,18 @@ const PaymentModal = ({
                     theme === "light" ? "text-blue-800" : "text-blue-300"
                   }
                 >
-                  To'lov summasi: {amount} so'm
+                  {t("paymentModal.paymentAmount")}: {amount} soʻm
                 </span>
-              </p>
-              <p className="text-xs text-gray-500 mt-1">
-                (Firebase'ga: {parseMoney(amount)} so'm)
               </p>
 
               {paymentType === "regular" &&
                 coursePrice > 0 &&
                 !isAmountEqualCoursePrice() && (
                   <p className="text-xs text-orange-500 mt-2">
-                    ⚠️ Kurs narxi {formatMoney(coursePrice)} so'm dan farq
-                    qilmoqda
+                    ⚠️{" "}
+                    {t("paymentModal.differsCoursePrice", {
+                      amount: `${formatMoney(coursePrice)} soʻm`,
+                    })}
                   </p>
                 )}
             </div>
@@ -553,8 +580,8 @@ const PaymentModal = ({
             }`}
           >
             {loading || sendingNotification
-              ? "Saqlanmoqda..."
-              : "To'lovni Tasdiqlash"}
+              ? t("Saving")
+              : t("paymentModal.confirmPayment")}
           </button>
         </div>
       </div>

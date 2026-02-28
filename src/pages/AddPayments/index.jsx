@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { useTranslation } from "react-i18next";
 import {
   collection,
   onSnapshot,
@@ -40,6 +41,7 @@ import { sendNotifications } from "../../utils/sendNotification";
 import { addNotification } from "../../createSlice/notificationSlice";
 
 const AddPayments = () => {
+  const { t } = useTranslation();
   const dispatch = useDispatch();
 
   // --- STATE ---
@@ -81,6 +83,13 @@ const AddPayments = () => {
     month: "long",
     year: "numeric",
   });
+
+  const parseAmount = useCallback((value) => {
+    if (value === null || value === undefined) return 0;
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    const normalized = String(value).replace(/[^\d]/g, "");
+    return normalized ? Number(normalized) : 0;
+  }, []);
 
   // --- HOLIDAY UTILS ---
   const {
@@ -206,7 +215,7 @@ const AddPayments = () => {
 
   const totalRevenue = payments
     .filter((p) => p.groupId === selectedGroupId)
-    .reduce((acc, curr) => acc + Number(curr.amount || 0), 0);
+    .reduce((acc, curr) => acc + parseAmount(curr.amount), 0);
 
   // Check if current group has active holiday
   const hasActiveHoliday = activeHolidays.length > 0;
@@ -237,12 +246,14 @@ const AddPayments = () => {
   };
 
   const handlePaymentSubmit = async () => {
-    if (!amount || Number(amount) <= 0) {
-      toast.error("Summani kiriting!");
+    const normalizedAmount = parseAmount(amount);
+
+    if (!normalizedAmount || normalizedAmount <= 0) {
+      toast.error(t("payments.enterAmount"));
       return;
     }
     if (!paymentDate) {
-      toast.error("Sanani tanlang!");
+      toast.error(t("payments.selectDate"));
       return;
     }
 
@@ -253,33 +264,15 @@ const AddPayments = () => {
         const debt = selectedStudent.info.debts[selectedDebtCycleIndex];
         const dStart = formatDateToUzbek(debt.startDate);
         const dEnd = formatDateToUzbek(debt.endDate);
-        note = `Qarz to'lovi: ${dStart} — ${dEnd}`;
+        note = `${t("payments.debtPayment")}: ${dStart} — ${dEnd}`;
       } else {
-        note = "Joriy to'lov";
+        note = t("payments.currentPayment");
       }
-
-      const selectedGroup = groups.find((g) => g.id === selectedGroupId);
-
-      const paymentData = {
-        studentId: selectedStudent.id,
-        studentName: (
-          selectedStudent.studentName ||
-          `${selectedStudent.firstName || ""} ${selectedStudent.lastName || ""}`
-        ).trim(),
-        groupId: selectedGroupId,
-        groupName: selectedGroup?.groupName || "Noma'lum",
-        amount: Number(amount),
-        date: paymentDate,
-        createdAt: new Date(),
-        type: paymentType,
-        note: note,
-        formattedDate: formatDateToUzbek(paymentDate),
-      };
 
       // Save to Firebase
       await originalHandlePaymentSubmit(
         selectedStudent,
-        amount,
+        normalizedAmount,
         paymentDate,
         paymentType,
         selectedDebtCycleIndex,
@@ -290,7 +283,7 @@ const AddPayments = () => {
       );
     } catch (e) {
       console.error("Payment error:", e);
-      toast.error("Xatolik: " + e.message);
+      toast.error(`${t("An error occurred")}: ${e.message}`);
     } finally {
       setLoading(false);
     }
@@ -298,13 +291,13 @@ const AddPayments = () => {
 
   const handleSendManualMessage = async () => {
     if (!msgGroupId || !msgStudentId || !msgText.trim()) {
-      toast.warning("Barcha maydonlarni to'ldiring!");
+      toast.warning(t("payments.fillAllFields"));
       return;
     }
 
     const targetStudent = msgStudentsList.find((s) => s.id === msgStudentId);
     if (!targetStudent?.telegramId) {
-      toast.error("Bu o'quvchida Telegram ID yo'q!");
+      toast.error(t("payments.noTelegramId"));
       return;
     }
 
@@ -327,19 +320,25 @@ const AddPayments = () => {
             studentName: fullName,
             message: message,
             groupId: msgGroupId,
-            groupName: selectedGroup?.groupName || "Noma'lum",
+            groupName: selectedGroup?.groupName || t("Unknown"),
             studentId: msgStudentId,
             notificationType: "manual_message",
           },
         ],
         {
-          showToast: true,
-          toastSuccess: "Xabar yuborildi",
-          toastError: "Xabar yuborilmadi",
+          showToast: false,
         },
       );
 
       if (result.success) {
+        toast.success(
+          <div>
+            <div className="font-bold">{t("payments.messageSent")}</div>
+            <div className="text-xs opacity-80 mt-1">
+              {result.deliveredCount || 1} ta studentga xabar yuborildi
+            </div>
+          </div>,
+        );
         setNotificationLog((prev) => [
           {
             date: formatDateToUzbek(new Date().toISOString()),
@@ -360,10 +359,19 @@ const AddPayments = () => {
         setMsgText("");
         setMsgStudentId("");
         setMsgGroupId("");
+      } else {
+        toast.error(
+          <div>
+            <div className="font-bold">{t("payments.messageNotSent")}</div>
+            <div className="text-xs opacity-80 mt-1">
+              {result.error || "Xabar yuborilmadi"}
+            </div>
+          </div>,
+        );
       }
     } catch (error) {
       console.error("Error sending message:", error);
-      toast.error("Xatolik yuz berdi");
+      toast.error(t("An error occurred"));
     } finally {
       setSendingMsg(false);
     }
@@ -376,21 +384,23 @@ const AddPayments = () => {
   return (
     <>
       <div
-        className={`${theme === "light" ? "bg-linear-to-br from-gray-50 via-slate-100/70 to-slate-200/30" : "bg-linear-to-br from-gray-800 via-slate-700/30 to-slate-800/30"} flex flex-col md:flex-row justify-between items-start md:items-center gap-4 py-5 px-4 rounded-2xl mb-5`}
+        className={`${theme === "light" ? "bg-slate-50 border border-slate-200" : "bg-slate-900/40 border border-slate-700"} flex flex-col md:flex-row justify-between items-start md:items-center gap-4 py-5 px-5 rounded-2xl mb-5`}
       >
         <div>
           <h1
-            className={`${theme === "light" ? "text-gray-500" : "text-gray-300"} text-2xl font-black tracking-tight`}
+            className={`${theme === "light" ? "text-slate-800" : "text-slate-100"} text-3xl font-black tracking-tight`}
           >
-            To'lovlar boshqaruvi
+            {t("payments.management")}
           </h1>
           <div className="flex items-center gap-3 mt-1">
-            <p className="text-slate-500 flex items-center gap-2 font-medium">
-              <FiCalendar className="text-blue-500" /> {today}
+            <p
+              className={`${theme === "light" ? "text-slate-500" : "text-slate-300"} flex items-center gap-2 text-sm font-medium`}
+            >
+              <FiCalendar className="text-indigo-500" /> {today}
             </p>
             {hasActiveHoliday && (
-              <span className="bg-purple-100 text-purple-600 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
-                <FiUmbrella /> Tatil ({activeHolidays.length})
+              <span className="bg-indigo-100 text-indigo-700 px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1">
+                <FiUmbrella /> {t("payments.holiday")} ({activeHolidays.length})
               </span>
             )}
           </div>
@@ -401,27 +411,27 @@ const AddPayments = () => {
           {/* TATIL BELGILASH TUGMASI */}
           <button
             onClick={() => setShowHolidayModal(true)}
-            className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-bold shadow-lg transition-all ${
+            className={`flex items-center gap-2 px-5 py-3.5 rounded-xl text-sm font-semibold shadow-sm transition-all ${
               theme === "light"
-                ? "active:scale-95 bg-white text-purple-600 hover:bg-purple-50 border border-purple-100"
-                : "active:scale-95 bg-[#1e2839d4] text-purple-300 hover:bg-slate-800 border border-slate-400/30"
+                ? "active:scale-95 bg-white text-slate-700 hover:bg-slate-50 border border-slate-200"
+                : "active:scale-95 bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-600"
             }`}
           >
-            <FiUmbrella className="text-xl" />
-            <span>Tatil belgilash</span>
+            <FiUmbrella className="text-base text-indigo-500" />
+            <span>{t("payments.setHoliday")}</span>
           </button>
 
           {/* XABAR YUBORISH TUGMASI */}
           <button
             onClick={() => setShowMsgModal(true)}
-            className={`flex items-center gap-3 px-6 py-4 rounded-2xl font-bold shadow-lg transition-all ${
+            className={`flex items-center gap-2 px-5 py-3.5 rounded-xl text-sm font-semibold shadow-sm transition-all ${
               theme === "light"
-                ? "active:scale-95 bg-white text-blue-600 hover:bg-blue-50 border border-blue-100"
-                : "active:scale-95 bg-[#1e2839d4] text-blue-300 hover:bg-slate-800 border border-slate-400/30"
+                ? "active:scale-95 bg-white text-slate-700 hover:bg-slate-50 border border-slate-200"
+                : "active:scale-95 bg-slate-800 text-slate-200 hover:bg-slate-700 border border-slate-600"
             }`}
           >
-            <FiMessageSquare className="text-xl" />
-            <span>Xabar yuborish</span>
+            <FiMessageSquare className="text-base text-indigo-500" />
+            <span>{t("payments.sendMessage")}</span>
           </button>
         </div>
       </div>
@@ -429,8 +439,8 @@ const AddPayments = () => {
       <div
         className={`min-h-screen p-4 md:p-8 font-sans ${
           theme === "light"
-            ? "bg-[#F8FAFC] text-slate-900"
-            : "bg-linear-to-br from-gray-900 via-slate-800/30 to-slate-900/30 text-slate-100"
+            ? "bg-[#F8FAFC] text-slate-900 border border-slate-200"
+            : "bg-slate-900/40 text-slate-100 border border-slate-700"
         } rounded-2xl`}
       >
         {/* HEADER */}
@@ -439,27 +449,27 @@ const AddPayments = () => {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mt-5">
             <StatCard
               icon={<FiUsers />}
-              label="Jami O'quvchilar"
+              label={t("payments.stats.totalStudents")}
               value={students.length}
               color="blue"
             />
             <StatCard
               icon={<FiUserCheck />}
-              label="Aktiv / To'lagan"
+              label={t("payments.stats.activePaid")}
               value={activeStudents}
               color="green"
             />
             <StatCard
               icon={<FiAlertTriangle />}
-              label="Diqqat Talab"
+              label={t("payments.stats.needsAttention")}
               value={debtStudents.length}
               color="red"
               animate={debtStudents.length > 0}
             />
             <StatCard
               icon={<FiDollarSign />}
-              label="Guruh Tushumi"
-              value={formatMoney(totalRevenue)}
+              label={t("payments.stats.groupRevenue")}
+              value={totalRevenue}
               color="emerald"
               isMoney
             />

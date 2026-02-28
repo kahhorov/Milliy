@@ -50,7 +50,7 @@ const DailyAttendance = () => {
 
         // ENG YANGILARI TEPADA TURISHI UCHUN:
         const sortedData = data.sort((a, b) => {
-          // 1. Agar vaqt maydoni (createdAt) bo'lsa, shunga qarab:
+          // 1. Agar vaqt maydoni (createdAt) boʻlsa, shunga qarab:
           const timeA = a.createdAt?.seconds || a.createdAt || 0;
           const timeB = b.createdAt?.seconds || b.createdAt || 0;
 
@@ -58,7 +58,7 @@ const DailyAttendance = () => {
             return timeB - timeA;
           }
 
-          // 2. Agar vaqt maydoni bo'lmasa, ID bo'yicha (oxirgi chora):
+          // 2. Agar vaqt maydoni boʻlmasa, ID boʻyicha (oxirgi chora):
           return b.id.localeCompare(a.id);
         });
 
@@ -102,7 +102,7 @@ const DailyAttendance = () => {
 
   return (
     <div
-      className={`min-h-screen p-4 md:p-8 transition-colors duration-500 ${
+      className={`section-muted-bg min-h-screen p-4 md:p-8 transition-colors duration-500 ${
         isDark ? "text-white" : "text-slate-800"
       }`}
     >

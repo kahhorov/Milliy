@@ -212,7 +212,7 @@ const Notifications = () => {
         holidays.forEach((holiday) => {
           if (!holiday || !holiday.id || !holiday.endDate) return;
 
-          // Agar holiday endDate = today bo'lsa va hali notification yuborilmagan bo'lsa
+          // Agar holiday endDate = today boʻlsa va hali notification yuborilmagan boʻlsa
           if (holiday.endDate === todayStr && !holiday.notificationSent) {
             const notificationId = `ended_${holiday.id}`;
 
@@ -258,7 +258,7 @@ const Notifications = () => {
     checkNewlyEndedHolidays();
   }, [holidays, todayStr, notifications, dispatch]);
 
-  // Separate holidays - faqat isActive bo'yicha filter
+  // Separate holidays - faqat isActive boʻyicha filter
   const activeHolidays = holidays
     .filter((h) => h.endDate >= todayStr && h.isActive !== false)
     .sort((a, b) => new Date(a.endDate) - new Date(b.endDate));
@@ -300,13 +300,13 @@ const Notifications = () => {
   const handleMarkAllAsRead = () => {
     dispatch(markAllAsRead());
 
-    // Update localStorage - barchasini o'qilgan deb belgilash
+    // Update localStorage - barchasini oʻqilgan deb belgilash
     const stored = JSON.parse(localStorage.getItem("notifications") || "[]");
     const updated = stored.map((n) => ({ ...n, read: true }));
     localStorage.setItem("notifications", JSON.stringify(updated));
 
     setShowClearModal(false);
-    toast.success("Barcha bildirishnomalar o'qilgan deb belgilandi");
+    toast.success("Barcha bildirishnomalar oʻqilgan deb belgilandi");
   };
 
   const handleDeleteHoliday = async () => {
@@ -327,11 +327,11 @@ const Notifications = () => {
       );
       dispatch(setNotifications(updatedNotifications));
 
-      toast.success("Tatil muvaffaqiyatli o'chirildi");
+      toast.success("Tatil muvaffaqiyatli oʻchirildi");
       setDeleteModal({ show: false, id: null, type: null });
     } catch (error) {
       console.error("Error deleting:", error);
-      toast.error("Xatolik yuz berdi");
+      toast.error(" Xatolik yuz berdi");
     } finally {
       setLoading(false);
     }
@@ -363,11 +363,11 @@ const Notifications = () => {
           : activeTab === "ended"
             ? "tugagan"
             : "barcha";
-      toast.success(` ${itemsToDelete.length} ta ${typeText} tatil o'chirildi`);
+      toast.success(`${itemsToDelete.length} ta ${typeText} tatil oʻchirildi`);
       setShowDeleteAllModal({ show: false, type: null });
     } catch (error) {
       console.error("Error deleting all:", error);
-      toast.error("Xatolik yuz berdi");
+      toast.error(" Xatolik yuz berdi");
     } finally {
       setLoading(false);
     }
@@ -455,7 +455,7 @@ const Notifications = () => {
         </div>
       </div>
 
-      {/* Mark All as Read Button - faqat o'qilmaganlar bo'lsa */}
+      {/* Mark All as Read Button - faqat oʻqilmaganlar boʻlsa */}
       {unreadCount > 0 && (
         <div className="flex justify-end">
           <Button
@@ -465,7 +465,7 @@ const Notifications = () => {
             className="!rounded-full !px-6 !py-3 font-bold shadow-lg hover:shadow-xl transition-all"
           >
             <FiCheck className="mr-2" />
-            Barchasini o'qilgan deb belgilash ({unreadCount})
+            Barchasini oʻqilgan deb belgilash ({unreadCount})
           </Button>
         </div>
       )}
@@ -494,9 +494,9 @@ const Notifications = () => {
             className="!rounded-full !px-6 !py-2 font-bold shadow-lg hover:shadow-xl transition-all"
           >
             <FiTrash2 className="mr-2" />
-            {activeTab === "all" && "Barcha tatillarni o'chirish"}
-            {activeTab === "active" && "Barcha aktiv tatillarni o'chirish"}
-            {activeTab === "ended" && "Barcha tugagan tatillarni o'chirish"} (
+            {activeTab === "all" && "Barcha tatillarni oʻchirish"}
+            {activeTab === "active" && "Barcha aktiv tatillarni oʻchirish"}
+            {activeTab === "ended" && "Barcha tugagan tatillarni oʻchirish"} (
             {currentItems.length})
           </Button>
         </div>
@@ -576,7 +576,7 @@ const Notifications = () => {
                     <Whisper
                       trigger="hover"
                       placement="left"
-                      speaker={<Tooltip>Tatilni o'chirish</Tooltip>}
+                      speaker={<Tooltip>Tatilni oʻchirish</Tooltip>}
                     >
                       <IconButton
                         icon={<FiTrash2 />}
@@ -721,7 +721,7 @@ const Notifications = () => {
               isDark ? "text-gray-400" : "text-gray-500"
             }`}
           >
-            {activeTab === "all" && "Sizda hali tatillar yo'q"}
+            {activeTab === "all" && "Sizda hali tatillar yoʻq"}
             {activeTab === "active" && "Aktiv tatillar mavjud emas"}
             {activeTab === "ended" && "Tugagan tatillar mavjud emas"}
           </p>
@@ -742,12 +742,12 @@ const Notifications = () => {
         <Modal.Header>
           <Modal.Title className="font-black flex items-center gap-2">
             <FiInfo className="text-red-500" />
-            O'chirishni tasdiqlang
+            Oʻchirishni tasdiqlang
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <p className={isDark ? "text-gray-300" : "text-gray-600"}>
-            Bu tatilni o'chirishni tasdiqlaysizmi?
+            Bu tatilni oʻchirishni tasdiqlaysizmi'
           </p>
         </Modal.Body>
         <Modal.Footer>
@@ -756,7 +756,7 @@ const Notifications = () => {
             color="red"
             appearance="primary"
           >
-            Ha, o'chirish
+            Ha, oʻchirish
           </Button>
           <Button
             onClick={() =>
@@ -780,17 +780,17 @@ const Notifications = () => {
         <Modal.Header>
           <Modal.Title className="font-black flex items-center gap-2">
             <FiInfo className="text-red-500" />
-            Barchasini o'chirishni tasdiqlang
+            Barchasini oʻchirishni tasdiqlang
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <p className={isDark ? "text-gray-300" : "text-gray-600"}>
             {showDeleteAllModal.type === "all" &&
-              `Barcha tatillarni (${currentItems.length} ta) o'chirishni tasdiqlaysizmi?`}
+              `Barcha tatillarni (${currentItems.length} ta) oʻchirishni tasdiqlaysizmi'`}
             {showDeleteAllModal.type === "active" &&
-              `Barcha aktiv tatillarni (${currentItems.length} ta) o'chirishni tasdiqlaysizmi?`}
+              `Barcha aktiv tatillarni (${currentItems.length} ta) oʻchirishni tasdiqlaysizmi'`}
             {showDeleteAllModal.type === "ended" &&
-              `Barcha tugagan tatillarni (${currentItems.length} ta) o'chirishni tasdiqlaysizmi?`}
+              `Barcha tugagan tatillarni (${currentItems.length} ta) oʻchirishni tasdiqlaysizmi'`}
           </p>
         </Modal.Body>
         <Modal.Footer>
@@ -799,7 +799,7 @@ const Notifications = () => {
             color="red"
             appearance="primary"
           >
-            Ha, barchasini o'chirish
+            Ha, barchasini oʻchirish
           </Button>
           <Button
             onClick={() => setShowDeleteAllModal({ show: false, type: null })}
@@ -821,12 +821,12 @@ const Notifications = () => {
         <Modal.Header>
           <Modal.Title className="font-black flex items-center gap-2">
             <FiInfo className="text-green-500" />
-            Barchasini o'qilgan deb belgilash
+            Barchasini oʻqilgan deb belgilash
           </Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <p className={isDark ? "text-gray-300" : "text-gray-600"}>
-            Barcha bildirishnomalarni o'qilgan deb belgilashni tasdiqlaysizmi?
+            Barcha bildirishnomalarni oʻqilgan deb belgilashni tasdiqlaysizmi'
           </p>
         </Modal.Body>
         <Modal.Footer>

@@ -545,9 +545,7 @@ function Group() {
   }
 
   return (
-    <div
-      className={`min-h-screen p-4 md:p-6 ${isDark ? "bg-gray-900" : "bg-gray-50"}`}
-    >
+    <div className={`section-muted-bg min-h-screen p-4 md:p-6`}>
       {/* Header */}
       <div className="mb-6">
         <h1
@@ -749,7 +747,7 @@ function Group() {
                           size="sm"
                           className="bg-blue-100 text-blue-600"
                         >
-                          {(rowData.studentName || "?").charAt(0)}
+                          {(rowData.studentName || "'").charAt(0)}
                         </Avatar>
                         <div>
                           <div

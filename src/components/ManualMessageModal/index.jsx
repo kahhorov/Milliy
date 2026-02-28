@@ -1,6 +1,7 @@
 import React from "react";
 import { FiX, FiSend } from "react-icons/fi";
 import { useSelector } from "react-redux";
+import { useTranslation } from "react-i18next";
 
 const ManualMessageModal = ({
   showMsgModal,
@@ -17,6 +18,7 @@ const ManualMessageModal = ({
   sendingMsg,
 }) => {
   if (!showMsgModal) return null;
+  const { t } = useTranslation();
   const theme = useSelector((state) => state.theme.value);
 
   return (
@@ -31,11 +33,11 @@ const ManualMessageModal = ({
             <h3
               className={`${theme === "light" ? "text-slate-800" : "text-slate-300"} text-xl font-black`}
             >
-              Xabar Yuborish
+              {t("payments.sendMessage")}
             </h3>
 
             <p className="text-sm text-slate-500 font-medium">
-              Bot orqali shaxsiy xabar
+              {t("payments.botPersonalMessage")}
             </p>
           </div>
           <button
@@ -50,7 +52,7 @@ const ManualMessageModal = ({
           {/* Group Select */}
           <div>
             <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1">
-              Guruhni Tanlang
+              {t("Select group")}
             </label>
             <div className="relative">
               <select
@@ -65,7 +67,7 @@ const ManualMessageModal = ({
                   value=""
                   className={`${theme === "light" ? "bg-white" : "bg-slate-800"}`}
                 >
-                  Tanlang...
+                  {t("Select group")}...
                 </option>
                 {groups.map((g) => (
                   <option key={g.id} value={g.id}>
@@ -80,7 +82,7 @@ const ManualMessageModal = ({
           {msgGroupId && (
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">
               <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1">
-                O'quvchini Tanlang
+                {t("Select student")}
               </label>
               <div className="relative">
                 <select
@@ -92,7 +94,7 @@ const ManualMessageModal = ({
                     value=""
                     className={`${theme === "light" ? "bg-white" : "bg-slate-800"}`}
                   >
-                    Tanlang...
+                    {t("Select student")}...
                   </option>
                   {msgStudentsList.map((s) => (
                     <option
@@ -112,13 +114,13 @@ const ManualMessageModal = ({
           {msgStudentId && (
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">
               <label className="text-[10px] font-black text-slate-400 uppercase mb-2 block ml-1">
-                Xabar Matni
+                {t("payments.messageText")}
               </label>
               <textarea
                 rows={4}
                 value={msgText}
                 onChange={(e) => setMsgText(e.target.value)}
-                placeholder="Xabaringizni yozing..."
+                placeholder={t("payments.writeMessage")}
                 className={`${
                   theme === "light"
                     ? `bg-slate-50 focus:bg-white text-slate-700 
@@ -156,10 +158,10 @@ const ManualMessageModal = ({
             }`}
           >
             {sendingMsg ? (
-              "Yuborilmoqda..."
+              t("payments.sending")
             ) : (
               <>
-                <FiSend /> Yuborish
+                <FiSend /> {t("payments.send")}
               </>
             )}
           </button>

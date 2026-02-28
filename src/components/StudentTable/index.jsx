@@ -6,6 +6,7 @@ import {
   FiUsers,
 } from "react-icons/fi";
 import { FaTelegramPlane } from "react-icons/fa";
+import { useTranslation } from "react-i18next";
 
 const StudentTable = ({
   theme,
@@ -15,19 +16,26 @@ const StudentTable = ({
   openPaymentModal,
   formatMoney,
 }) => {
+  const { t } = useTranslation();
   if (!selectedGroupId) {
     return (
-      <div className="py-32 text-center text-slate-400">
-        <FiUsers size={48} className="mx-auto mb-4 opacity-20" />
-        <p>Iltimos, ishni boshlash uchun guruhni tanlang</p>
-        <p className="text-sm mt-2">Hali guruh tanlanmagan</p>
+      <div
+        className={`py-24 text-center rounded-2xl border ${
+          theme === "light"
+            ? "bg-white border-slate-200 text-slate-500"
+            : "bg-slate-800/40 border-slate-700 text-slate-300"
+        }`}
+      >
+        <FiUsers size={48} className="mx-auto mb-4 opacity-30" />
+        <p className="text-base font-medium">{t("Select group to attend")}</p>
+        <p className="text-sm mt-2">{t("No group selected!")}</p>
       </div>
     );
   }
 
   return (
     <div
-      className={`${theme === "light" ? "bg-white border border-slate-200" : "bg-slate-800/20 text-slate-300"} rounded-4xl shadow-xl overflow-hidden`}
+      className={`${theme === "light" ? "bg-white border border-slate-200" : "bg-slate-800/20 text-slate-300 border border-slate-700"} rounded-2xl shadow-sm overflow-hidden`}
     >
       <div className="overflow-x-auto">
         <table className="w-full text-left border-collapse">
@@ -35,16 +43,18 @@ const StudentTable = ({
             className={`${theme === "light" ? "bg-slate-50 border-b border-slate-100 text-slate-400" : "bg-slate-800/40"} text-[10px] uppercase font-black tracking-widest select-none`}
           >
             <tr>
-              <th className="py-6 px-8">O'quvchi</th>
+              <th className="py-6 px-8">{t("Student")}</th>
               <th className="py-6 px-6 text-center">
-                Joriy Holat (
+                {t("payments.currentStatus")} (
                 {calculatedStudents[0]?.info?.currentCycle?.totalLessons || 12}{" "}
-                dars)
+                {t("Lessons")})
               </th>
-              <th className="py-6 px-6 text-center">Status</th>
-              <th className="py-6 px-8 text-center">Qarzdorlik / Balans</th>
-              <th className="py-6 px-8 text-center">Eslatma</th>
-              <th className="py-6 px-8 text-right">Amal</th>
+              <th className="py-6 px-6 text-center">{t("Status")}</th>
+              <th className="py-6 px-8 text-center">
+                {t("payments.debtOrBalance")}
+              </th>
+              <th className="py-6 px-8 text-center">{t("Note")}</th>
+              <th className="py-6 px-8 text-right">{t("Action")}</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-50">
@@ -67,11 +77,12 @@ const StudentTable = ({
                 const needsNotification = info.needNotification;
                 const hasTelegramId = !!student.telegramId;
 
-                // Darslar sonini xavfsiz o'zgaruvchiga olish
+                // Darslar sonini xavfsiz oʻzgaruvchiga olish
                 const lessonsPassed = currentCycle.lessonsPassed ?? 0;
                 const lessonsLeft = currentCycle.lessonsLeft ?? 0;
                 const totalLessons = currentCycle.totalLessons ?? 12;
                 const isPaid = !!currentCycle.isPaid;
+                const canMakePayment = true;
 
                 return (
                   <tr
@@ -96,7 +107,7 @@ const StudentTable = ({
                           {(
                             student.studentName ||
                             student.firstName ||
-                            "?"
+                            "'"
                           ).charAt(0)}
                         </div>
                         <div>
@@ -106,7 +117,7 @@ const StudentTable = ({
                             {`${student.studentName || ""} ${student.lastName || ""}`}
                           </p>
                           <p className="text-xs text-slate-400">
-                            {student.phoneNumber || "Tel kiritilmagan"}
+                            {student.phoneNumber || t("No phone number")}
                           </p>
                         </div>
                       </div>
@@ -129,10 +140,10 @@ const StudentTable = ({
                         }`}
                       >
                         {isUrgent
-                          ? "Tolov qlish zarur"
+                          ? t("payments.paymentRequired")
                           : isLastDay
-                            ? "OXIRGI KUN - TO'LOV KERAK"
-                            : `${lessonsPassed} / ${totalLessons} dars`}
+                            ? t("payments.lastDayPaymentNeeded")
+                            : `${lessonsPassed} / ${totalLessons} ${t("Lessons")}`}
                       </div>
                       <div className="w-32 h-2 bg-slate-200 rounded-full mx-auto overflow-hidden relative">
                         <div
@@ -162,8 +173,8 @@ const StudentTable = ({
                         className={`${theme === "light" ? "text-slate-500" : "text-slate-200"} text-xs mt-1`}
                       >
                         {isLastDay
-                          ? "Oxirgi dars"
-                          : `${lessonsLeft} dars qoldi`}
+                          ? t("payments.lastLesson")
+                          : t("payments.lessonsLeft", { count: lessonsLeft })}
                       </div>
                     </td>
 
@@ -189,7 +200,7 @@ const StudentTable = ({
                       >
                         {isUrgent && <FiAlertCircle size={12} />}
                         {isLastDay && <FiAlertTriangle size={12} />}
-                        {info.badgeText || "Status yo'q"}
+                        {info.badgeText || t("payments.noStatus")}
                       </span>
                     </td>
 
@@ -207,7 +218,7 @@ const StudentTable = ({
                             )}
                           </span>
                           <span className="text-[9px] text-red-400 font-bold uppercase">
-                            Qarzdorlik
+                            {t("Debt")}
                           </span>
                         </div>
                       ) : info.balance > 0 ? (
@@ -216,7 +227,16 @@ const StudentTable = ({
                             + {formatMoney(info.balance)}
                           </span>
                           <span className="text-[9px] text-emerald-400 font-bold uppercase">
-                            Balansda bor
+                            {t("payments.inBalance")}
+                          </span>
+                        </div>
+                      ) : isPaid ? (
+                        <div className="flex flex-col items-center">
+                          <span className="text-emerald-600 font-bold text-sm">
+                            + {formatMoney(info.coursePrice || 0)}
+                          </span>
+                          <span className="text-[9px] text-emerald-400 font-bold uppercase">
+                            {t("Paid")}
                           </span>
                         </div>
                       ) : (
@@ -240,15 +260,15 @@ const StudentTable = ({
                                 className={`text-[10px] font-bold mt-1 ${isLastDay ? "text-orange-500" : "text-green-500"}`}
                               >
                                 {isLastDay
-                                  ? "OXIRGI KUN - XABAR YUBORILDI"
-                                  : "Xabar yuborildi"}
+                                  ? t("payments.lastDayMessageSent")
+                                  : t("payments.messageSent")}
                               </span>
                             </>
                           ) : (
                             <>
                               <div className="w-3 h-3 bg-slate-300 rounded-full"></div>
                               <span className="text-[10px] text-slate-400 font-bold mt-1">
-                                Telegram id yo'q
+                                {t("payments.noTelegramId")}
                               </span>
                             </>
                           )}
@@ -257,7 +277,7 @@ const StudentTable = ({
                         <div className="flex flex-col items-center">
                           <FiCheckCircle className="text-emerald-500" />
                           <span className="text-[10px] text-emerald-500 font-bold mt-1">
-                            To'langan
+                            {t("Paid")}
                           </span>
                         </div>
                       ) : (
@@ -268,7 +288,10 @@ const StudentTable = ({
                     {/* Action */}
                     <td className="py-5 px-8 w-[170px] text-right">
                       <button
-                        onClick={() => openPaymentModal(student)}
+                        onClick={() =>
+                          canMakePayment && openPaymentModal(student)
+                        }
+                        disabled={!canMakePayment}
                         className={`px-3 py-1 cursor-pointer rounded-full border transition-all shadow-sm active:scale-95
                         ${
                           isUrgent || isCritical || isExpired
@@ -280,7 +303,7 @@ const StudentTable = ({
                                 : "bg-blue-400/10 text-blue-400 inset-ring inset-ring-blue-400/30 hover:bg-blue-400/20 "
                         }`}
                       >
-                        Tolov qlish
+                        {t("payments.makePayment")}
                       </button>
                     </td>
                   </tr>
