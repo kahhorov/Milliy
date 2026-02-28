@@ -251,7 +251,7 @@ const AttendanceManagement = () => {
     const worksheet = workbook.addWorksheet("Davomat Hisoboti");
 
     worksheet.columns = [
-      { width: 8 }, // в„–
+      { width: 8 },
       { width: 35 }, // F.I.SH
       { width: 20 }, // Telefon
       { width: 15 }, // Holati
@@ -316,7 +316,6 @@ const AttendanceManagement = () => {
           };
 
           const head = worksheet.addRow([
-            "в„–",
             "OʻQUVCHI F.I.SH",
             "TELEFON",
             "HOLATI",

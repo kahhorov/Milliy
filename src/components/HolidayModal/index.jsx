@@ -131,7 +131,7 @@ const HolidayModal = ({
           const startDateFormatted = formatDateToUzbek(startDate);
           const endDateFormatted = formatDateToUzbek(endDate);
 
-          const message = `рџЏ– <b>TATIL BOSHLANDI</b>\n\nрџ“љ Guruh: <b>${selectedGroup?.groupName}</b>\nрџ“… Tatil: <b>${startDateFormatted} вЂ” ${endDateFormatted}</b>\nрџ“ќ Izoh: <i>${description || "Dam olish kuni"}</i>\n\nвњЁ Tatil muddati davomida darslar boʻlmaydi.\nрџ”” Tatil tugagach yana xabar beramiz.`;
+          const message = `<b>TATIL BOSHLANDI</b>\n\n Guruh: <b>${selectedGroup?.groupName}</b>\n Tatil: <b>${startDateFormatted} ---- ${endDateFormatted}</b>\n Izoh: <i>${description || "Dam olish kuni"}</i>\n\n Tatil muddati davomida darslar boʻlmaydi.\n Tatil tugagach yana xabar beramiz.`;
 
           const notifications = studentsWithTelegram.map((s) => ({
             telegramId: s.telegramId,
@@ -422,8 +422,7 @@ const HolidayModal = ({
                     theme === "light" ? "text-purple-800" : "text-purple-300"
                   }
                 >
-                  {formatDateToUzbek(startDate)} вЂ”{" "}
-                  {formatDateToUzbek(endDate)}
+                  {formatDateToUzbek(startDate)} {formatDateToUzbek(endDate)}
                 </span>
               </p>
               <p className="text-xs text-slate-400 mt-1">
@@ -431,7 +430,7 @@ const HolidayModal = ({
               </p>
               {groupStudents.length > 0 && (
                 <p className="text-xs text-green-500 mt-2">
-                  рџ“± {groupStudents.filter((s) => s.telegramId).length} ta
+                  {groupStudents.filter((s) => s.telegramId).length} ta
                   oʻquvchiga xabar boradi
                 </p>
               )}
